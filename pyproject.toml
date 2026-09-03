@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pynq-pr"
+version = "0.1.0"
+requires-python = ">=3.8"
+dependencies = ["pyyaml"]
+
+[tool.setuptools]
+packages = ["pynq_pr"]
+
+[tool.setuptools.package-data]
+pynq_pr = [
+    "scripts/*.tcl",
+    "versatile/rtl/*.vhd",
+    "versatile/rtl/*.v",
+    "versatile/ip/**/*",
+]
+
+[project.scripts]
+pynq-pr = "pynq_pr.cli:main"
