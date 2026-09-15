@@ -5,17 +5,12 @@ Automated partial reconfiguration bitstream generation for PYNQ-compatible board
 ## Install
 
 ```bash
-git clone --recurse-submodules <repo-url> pynq-pr
+git clone https://github.com/watcag/pynq-pr.git
 cd pynq-pr
-pip install -r requirements.txt
+python3 -m pip install .
 ```
 
-If you already cloned without `--recurse-submodules`:
-
-```bash
-git submodule update --init
-pip install -r requirements.txt
-```
+Vivado is required for bitstream generation. Verilator is required only for simulation. Board deployment additionally requires the matching PYNQ image and hardware.
 
 ## Usage
 
@@ -91,3 +86,7 @@ Your RTL modules must match these port names to connect to the shipped block des
 - **[Add/Sub](examples/add_sub/)**: three independent reconfigurable partitions, each with polynomial module variants.
 - **[Vision](examples/vision/)**: two reconfigurable image filter partitions chained through an AXI-Stream switch, with four HLS-generated 3×3 kernels.
 - **[Attention](examples/attention/)**: scaled dot-product attention computed by sequentially reconfiguring a single partition through QK matmul, softmax, and PV matmul stages.
+
+## Paper
+
+This repository accompanies “Cocotb-PYNQ-PR: From Co-Simulation to Deployment, A Unified DFX Framework for PYNQ,” presented at FPL 2026 and awarded the Stamatis Vassiliadis Memorial Best Paper Award. [Read the paper](https://nachiket.github.io/publications/cocotb-pynq-pr_fpl-2026.pdf).

@@ -1,6 +1,0 @@
-[submodule "examples/llm/ibert"]
-	path = examples/llm/ibert
-	url = ist-git@git.uwaterloo.ca:llm-inference/ibert.git
-[submodule "thirdparty/cocotbpynq"]
-	path = thirdparty/cocotbpynq
-	url = ist-git@git.uwaterloo.ca:watcag/cocotbpynq.git
