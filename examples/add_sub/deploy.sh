@@ -3,15 +3,18 @@
 # Run from examples/add_sub/.
 #
 # Usage:
-#   ./deploy.sh -b <board> [bits|run|all]
+#   BOARD_IP=<board> BOARD_PSWD=<pw> ./deploy.sh -b <board> [bits|run|all]
 #
 #   -b, --board: z1 or kv260 (required)
 #   command: bits, run, or all (default: all)
 #
 # Examples:
-#   ./deploy.sh -b z1
-#   ./deploy.sh --board kv260 bits
-#   BOARD_IP=myboard.local ./deploy.sh -b z1 run
+#   BOARD_IP=<board> BOARD_PSWD=<pw> ./deploy.sh -b z1
+#   BOARD_IP=<board> BOARD_PSWD=<pw> ./deploy.sh --board kv260 bits
+#   BOARD_IP=<board> BOARD_PSWD=<pw> ./deploy.sh -b z1 run
+#
+# Environment: BOARD_IP and BOARD_PSWD are required. Optional: BOARD_USER
+# (default xilinx on z1, ubuntu on kv260), BOARD_DIR (default ~), PROJECT.
 
 set -e
 cd "$(dirname "$0")"
@@ -35,15 +38,13 @@ fi
 
 if [ "$BOARD" = "kv260" ]; then
     BOARD_USER="${BOARD_USER:-ubuntu}"
-    BOARD_PSWD="${BOARD_PSWD:-xilinx123}"
-    BOARD_IP="${BOARD_IP:-pynq-kria0.eng.uwaterloo.ca}"
 elif [ "$BOARD" = "z1" ]; then
     BOARD_USER="${BOARD_USER:-xilinx}"
-    BOARD_PSWD="${BOARD_PSWD:-xilinx}"
-    BOARD_IP="${BOARD_IP:-pynq2.eng.uwaterloo.ca}"
 else
     echo "Unknown board: $BOARD (expected z1 or kv260)"; exit 1
 fi
+BOARD_IP="${BOARD_IP:?Set BOARD_IP to the board hostname or IP address}"
+BOARD_PSWD="${BOARD_PSWD:?Set BOARD_PSWD to the sudo password of BOARD_USER}"
 
 PROJECT="${PROJECT:-tutorial_${BOARD}}"
 BOARD_DIR="${BOARD_DIR:-~}"

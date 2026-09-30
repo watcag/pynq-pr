@@ -94,10 +94,10 @@ def run_simulation(config, test, test_dir=None):
 
             runner._generate_hwh = _generate_hwh_with_project_alias
 
-        runner.run()
+        num_failed = runner.run()
         print("Done.")
 
-    return 0
+    return 1 if num_failed else 0
 
 
 def main():

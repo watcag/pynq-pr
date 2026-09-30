@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use pynq-pr, please cite the paper below."
+title: pynq-pr
+repository-code: https://github.com/watcag/pynq-pr
+authors:
+  - {family-names: Guevara, given-names: Emir}
+  - {family-names: Sharma, given-names: Chaitanya}
+  - {family-names: Lusby, given-names: Gavin}
+  - {family-names: Kapre, given-names: Nachiket}
+preferred-citation:
+  type: conference-paper
+  title: "Cocotb-PYNQ-PR: From Co-Simulation to Deployment, A Unified DFX Framework for PYNQ"
+  authors:
+    - {family-names: Guevara, given-names: Emir}
+    - {family-names: Sharma, given-names: Chaitanya}
+    - {family-names: Lusby, given-names: Gavin}
+    - {family-names: Kapre, given-names: Nachiket}
+  conference:
+    name: "International Conference on Field-Programmable Logic and Applications (FPL 2026)"
+  year: 2026

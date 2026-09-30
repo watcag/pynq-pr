@@ -1,12 +1,28 @@
 [build-system]
-requires = ["setuptools>=64"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "pynq-pr"
-version = "0.1.0"
-requires-python = ">=3.8"
-dependencies = ["pyyaml", "cocotbpynq>=0.0.3"]
+version = "0.1.1"
+requires-python = ">=3.10"
+description = "YAML-driven Vivado DFX (partial reconfiguration) flow, swap-aware co-simulation and PYNQ runtime for Cocotb-PYNQ-PR designs"
+readme = "README.md"
+authors = [
+    { name="Emir Guevara", email="e2guevar@uwaterloo.ca" },
+    { name="Chaitanya Sharma", email="chaitanya.sharma@uwaterloo.ca" },
+    { name="Gavin Lusby", email="gdplusby@uwaterloo.ca" },
+    { name="Nachiket Kapre", email="nachiket@uwaterloo.ca" }
+]
+# license: pending decision (see LICENSE status in README); do not publish to PyPI before it is set
+dependencies = ["pyyaml", "cocotbpynq>=0.1.0,<0.2"]
+
+[project.optional-dependencies]
+examples = ["pillow"]
+
+[project.urls]
+Homepage = "https://github.com/watcag/pynq-pr"
+Issues = "https://github.com/watcag/pynq-pr/issues"
 
 [tool.setuptools]
 packages = ["pynq_pr"]
@@ -17,6 +33,9 @@ pynq_pr = [
     "versatile/rtl/*.vhd",
     "versatile/rtl/*.v",
     "versatile/ip/**/*",
+    "versatile/NOTICE",
+    "rtl/*.v",
+    "constraints/*.xdc",
 ]
 
 [project.scripts]
