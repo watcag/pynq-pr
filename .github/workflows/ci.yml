@@ -6,6 +6,10 @@ on:
   schedule:
     - cron: "0 6 * * 1"   # weekly: catch breaking upstream releases
 
+concurrency:   # a newer push to the same branch cancels the stale run
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   package:
     runs-on: ubuntu-latest
@@ -31,6 +35,7 @@ jobs:
   sim:
     needs: package
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -41,7 +46,7 @@ jobs:
         with: {python-version: "${{ matrix.python }}"}
       - uses: actions/download-artifact@v4
         with: {name: dist, path: dist/}
-      - name: Install the built wheel (pulls cocotbpynq from PyPI)
+      - name: Install the built wheel (pulls cocotbpynq from its GitHub release tag)
         run: |
           pip install "$(ls dist/*.whl)[examples]" verilator==5.48.0
           pip list | grep -iE "pynq|cocotb|verilator"
@@ -53,5 +58,5 @@ jobs:
         run: |
           set -e
           for e in add_sub attention vision; do
-            echo "::group::$e"; (cd examples/$e && pynq-pr sim -c pr_z1.yaml --test pr_test.py -f); echo "::endgroup::"
+            echo "::group::$e"; (cd examples/$e && timeout 300 pynq-pr sim -c pr_z1.yaml --test pr_test.py -f); echo "::endgroup::"
           done

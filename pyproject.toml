@@ -15,7 +15,8 @@ authors = [
     { name="Nachiket Kapre", email="nachiket@uwaterloo.ca" }
 ]
 # license: pending decision (see LICENSE status in README); do not publish to PyPI before it is set
-dependencies = ["pyyaml", "cocotbpynq>=0.1.0,<0.2"]
+# cocotbpynq 0.1.0 is distributed from GitHub until it is on PyPI
+dependencies = ["pyyaml", "cocotbpynq @ git+https://github.com/watcag/cocotbpynq@v0.1.0"]
 
 [project.optional-dependencies]
 examples = ["pillow"]
