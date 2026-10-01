@@ -56,6 +56,7 @@ def main(dut=None):
         exp = [fn(v) for v in X]
         status = "PASS" if result == exp else "FAIL"
         print(f"  {pname}/{bitname}: {result}  [{status}]")
+        assert result == exp, f"{pname}/{bitname}: got {result}, expected {exp}"
 
 
 if __name__ == "__main__":

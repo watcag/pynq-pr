@@ -1,0 +1,62 @@
+name: ci
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"   # weekly: catch breaking upstream releases
+
+concurrency:   # a newer push to the same branch cancels the stale run
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install build twine
+      - run: python -m build && twine check dist/*
+      - name: Every tracked file under pynq_pr/ is in the wheel
+        run: |
+          python - <<'PY'
+          import glob, subprocess, zipfile
+          wheel = set(zipfile.ZipFile(glob.glob("dist/*.whl")[0]).namelist())
+          tracked = subprocess.run(["git", "ls-files", "pynq_pr"], capture_output=True, text=True).stdout.split()
+          missing = [f for f in tracked if f not in wheel]
+          assert not missing, f"missing from wheel: {missing}"
+          print("wheel contents OK")
+          PY
+      - uses: actions/upload-artifact@v4
+        with: {name: dist, path: dist/}
+
+  sim:
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "${{ matrix.python }}"}
+      - uses: actions/download-artifact@v4
+        with: {name: dist, path: dist/}
+      - name: Install the built wheel (pulls cocotbpynq from its GitHub release tag)
+        run: |
+          pip install "$(ls dist/*.whl)[examples]" verilator==5.48.0
+          pip list | grep -iE "pynq|cocotb|verilator"
+      - name: Validate example configs
+        run: |
+          set -e
+          for c in examples/*/pr_*.yaml; do (cd "$(dirname $c)" && pynq-pr validate -c "$(basename $c)"); done
+      - name: Simulate examples
+        run: |
+          set -e
+          for e in add_sub attention vision; do
+            echo "::group::$e"; (cd examples/$e && timeout 300 pynq-pr sim -c pr_z1.yaml --test pr_test.py -f); echo "::endgroup::"
+          done

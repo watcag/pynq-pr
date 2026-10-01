@@ -9,6 +9,17 @@ The fix is a custom PMU firmware compiled with `SECURE_ACCESS_VAL=1`, which
 unlocks access to the CSU registers that gate PCAP/ICAP control. A pre-built
 `BOOT.BIN` with this fix is included in this directory.
 
+Check the file before flashing it:
+
+```bash
+sha256sum docs/kv260/BOOT.BIN
+# a02cec2e8ddf8767db0d7333ddda8550c8efd85aa4b64d63c2cc7ff35e8e8ff5
+```
+
+It was built with the recipe in [Rebuild from source](#rebuild-from-source)
+(PetaLinux/BSP version: TODO). You only need it for `reconfiguration_method: icap`
+on the KV260; PCAP works with the stock firmware.
+
 ## Diagnose
 
 To confirm this is the issue, log into the board and run as root:

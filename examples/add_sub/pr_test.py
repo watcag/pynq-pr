@@ -65,6 +65,9 @@ def dma_test(send_dma, recv_dma=None):
     return result
 
 
+FAILURES = []
+
+
 def test_independent(ol, icap):
     print("\n=== Independent ===")
     ext = ".bin" if icap else ".bit"
@@ -79,6 +82,8 @@ def test_independent(ol, icap):
             exp = [fn(v) for v in X]
             status = "PASS" if result == exp else "FAIL"
             print(f"  {pname}/{bitname}: {result}  [{status}]")
+            if status == "FAIL":
+                FAILURES.append(f"{pname}/{bitname}")
 
 
 def test_chains(ol, icap):
@@ -99,6 +104,8 @@ def test_chains(ol, icap):
         exp = expected(chain)
         status = "PASS" if result == exp else "FAIL"
         print(f"  {label}: {result}  [{status}]")
+        if status == "FAIL":
+            FAILURES.append(label)
 
     ol.default_routing()
 
@@ -120,6 +127,7 @@ def main(dut=None):
     test_chains(ol, icap)
 
     print("\nAll tests done.")
+    assert not FAILURES, f"{len(FAILURES)} mismatches: {FAILURES}"
 
 
 if __name__ == "__main__":
