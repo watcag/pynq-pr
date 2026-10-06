@@ -45,6 +45,8 @@ def generate_tcl_config(config, board, root_dir, proj_dir, bits_dir, pblocks_xdc
 
     source_list = " ".join(f'"{s}"' for s in all_sources)
     lines.append(f"set source_files [list {source_list}]")
+    include_dirs = list(dict.fromkeys(str(Path(s).parent) for s in all_sources))
+    lines.append("set include_dirs [list " + " ".join(f'"{d}"' for d in include_dirs) + "]")
 
     defines = config.get("defines", {})
     if defines:

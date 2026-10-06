@@ -29,6 +29,13 @@ if { $board_part ne "" } {
 }
 
 add_files $source_files
+# `include resolves against the source directories; headers are not compiled on their own
+if { [info exists include_dirs] } {
+    set_property include_dirs $include_dirs [current_fileset]
+}
+foreach f [get_files -quiet -of_objects [current_fileset] {*.h *.vh *.svh}] {
+    set_property file_type {Verilog Header} $f
+}
 if { $verilog_defines ne "" } {
     set_property verilog_define $verilog_defines [current_fileset]
 }
