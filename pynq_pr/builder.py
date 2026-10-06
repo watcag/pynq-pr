@@ -33,6 +33,7 @@ def generate_tcl_config(config, board, root_dir, proj_dir, bits_dir, pblocks_xdc
     tcl_set("data_freq", config["data_freq"])
     tcl_set("stream_width", config["stream_width"])
     tcl_set("dma_burst", config["dma_burst"])
+    tcl_set("streams", config["streams"])
     tcl_set("jobs", jobs)
     tcl_set("proj_dir", str(proj_dir))
     tcl_set("bits_dir", str(bits_dir))

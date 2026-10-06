@@ -59,6 +59,12 @@ def validate(config, root_dir):
     if burst not in (2, 4, 8, 16, 32, 64, 128, 256):
         raise ValueError(f"dma_burst must be a power of two from 2 to 256, got {burst}")
 
+    streams = config.get("streams", 1)
+    if streams not in (1, 2):
+        raise ValueError(f"streams must be 1 or 2 (stream k uses HP<k>), got {streams}")
+    if streams > 1 and (config.get("reconfiguration_method", "pcap") != "pcap" or config.get("axis_switch")):
+        raise ValueError("streams: 2 needs pcap (ICAP fetches over HP1) and no axis_switch")
+
     regions = config.get("reconfigurable_regions")
     if regions is not None and (not isinstance(regions, list) or not all(isinstance(r, str) for r in regions)):
         raise ValueError("reconfigurable_regions must be a list of clock region names, e.g. [X0Y1, X1Y1]")
@@ -76,8 +82,9 @@ def apply_defaults(config, root_dir):
     config.setdefault("data_freq", 100)        # MHz, PL clock of the RPs, DMAs and interconnects
     config.setdefault("stream_width", 32)      # RP AXI4-Stream TDATA bits
     config.setdefault("dma_burst", 16)         # AXI DMA max burst length (beats)
+    config.setdefault("streams", 1)            # stream pairs per partition, each with its own DMA
 
-    dummy_path = str(PKG_DIR / "rtl" / "dummy.v")
+    dummy_path = str(PKG_DIR / "rtl" / ("dummy.v" if config["streams"] == 1 else "dummy2.v"))
     if "sources" not in config:
         config["sources"] = []
     if dummy_path not in config["sources"]:
