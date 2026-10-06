@@ -99,6 +99,9 @@ def build(config_path, force=False, jobs=16):
     root_dir = Path.cwd()
     config = load_config(config_path)
     board = load_board(config["board"])
+    if config.get("reconfigurable_regions"):
+        board = dict(board, reconfigurable_regions=config["reconfigurable_regions"])
+        board.pop("reconfigurable_regions_lte2", None)
 
     proj_dir = root_dir / "output" / config["project"]
 

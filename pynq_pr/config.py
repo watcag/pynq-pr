@@ -59,6 +59,10 @@ def validate(config, root_dir):
     if burst not in (2, 4, 8, 16, 32, 64, 128, 256):
         raise ValueError(f"dma_burst must be a power of two from 2 to 256, got {burst}")
 
+    regions = config.get("reconfigurable_regions")
+    if regions is not None and (not isinstance(regions, list) or not all(isinstance(r, str) for r in regions)):
+        raise ValueError("reconfigurable_regions must be a list of clock region names, e.g. [X0Y1, X1Y1]")
+
     for src in config["sources"]:
         if not (root_dir / src).exists():
             raise FileNotFoundError(f"Source not found: {root_dir / src}")

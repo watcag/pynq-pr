@@ -75,6 +75,7 @@ Output lands in `output/<project>/bits/`: one static bitstream (`<project>.bit`)
 | `defines` | none | Dict of Verilog `` `define `` values applied project-wide. |
 | `data_freq` | `100` | PL clock (MHz) of the RPs, DMAs and interconnects. |
 | `stream_width` | `32` | RP AXI4-Stream TDATA width (`x_TDATA`/`y_TDATA`, DMA streams, decouplers). `pynq-pr sim` supports 32 only. |
+| `reconfigurable_regions` | board default | Clock regions shared out among the partitions (the rest stay static), e.g. `[X0Y1, X0Y2, X0Y3, X1Y1, X1Y2, X1Y3, X2Y1, X2Y2, X2Y3]` on the KV260 keeps the whole bottom row static. |
 | `dma_burst` | `16` | AXI DMA maximum burst length (beats, 2 to 256), both channels. |
 
 ### RTL interface requirements
