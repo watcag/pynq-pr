@@ -12,6 +12,7 @@ def main():
     build_p = sub.add_parser("build", help="Run full PR build flow")
     build_p.add_argument("-c", "--config", required=True, help="Path to pr yaml config file")
     build_p.add_argument("-f", "--force", action="store_true", help="Remove existing output directory before building")
+    build_p.add_argument("-j", "--jobs", type=int, default=16, help="Vivado run jobs and max threads (default 16)")
 
     val_p = sub.add_parser("validate", help="Check config and source files")
     val_p.add_argument("-c", "--config", required=True, help="Path to pr yaml config file")
@@ -29,7 +30,7 @@ def main():
 
     if args.command == "build":
         from .builder import build
-        build(args.config, force=args.force)
+        build(args.config, force=args.force, jobs=args.jobs)
     elif args.command == "validate":
         from .builder import validate_config
         validate_config(args.config)

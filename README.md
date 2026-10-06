@@ -19,7 +19,7 @@ This also installs cocotbpynq for simulation. Update with `git pull` followed by
 | Tool | Needed for | Version |
 |---|---|---|
 | Python | everything | 3.10+ |
-| Vivado (+ Vitis HLS for the vision example) | `pynq-pr build` | `build.tcl` currently requires 2022.2 |
+| Vivado (+ Vitis HLS for the vision example) | `pynq-pr build` | 2022.2 to 2026.x (`build.tcl` checks); tested 2022.2–2025.1 |
 | Verilator | `pynq-pr sim` | 5.036+ (the `verilator` wheel from PyPI works; `apt` versions are too old) |
 | PYNQ image on the board | running the bitstreams | v3.0.1 (PYNQ-Z1), Kria-PYNQ v3.0.1 (KV260) |
 
@@ -62,6 +62,7 @@ All paths are relative to the working directory:
 pynq-pr validate -c pr.yaml          # check config and source paths
 pynq-pr build -c pr.yaml             # synth -> impl -> bitstreams
 pynq-pr build -c pr.yaml --force     # overwrite existing output directory
+pynq-pr build -c pr.yaml -j 8        # Vivado jobs/threads (default 16)
 ```
 
 Output lands in `output/<project>/bits/`: one static bitstream (`<project>.bit`), one partial bitstream per module (`<partition>_<cell_name>.bit`), plus matching `.hwh` files.

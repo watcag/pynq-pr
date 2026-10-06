@@ -1,6 +1,6 @@
 # build.tcl — Top-level entry point for the pynq-pr Vivado DFX build flow.
 #
-# Invoked by the Python CLI via: vivado -mode tcl -source build.tcl -tclargs build_config.tcl
+# Invoked by the Python CLI via: vivado -mode batch -source build.tcl -tclargs build_config.tcl
 #
 # This script creates a Vivado project, adds RTL sources, sources the
 # user/shipped base block design, then runs the DFX flow in four stages:
@@ -11,11 +11,14 @@
 set config_file [lindex $argv 0]
 source $config_file
 
-#do not use vivado 2022.1, DFX doesn't seem to work properly
+# Vivado 2022.2 to 2026.x. Do not use 2022.1: DFX doesn't work properly there.
 set vivado_version [version -short]
-if { $vivado_version ne "2022.2" } {
-    error "ERROR: Vivado 2022.2 is required. Detected: $vivado_version"
+if { [package vcompare $vivado_version 2022.2] < 0 || [package vcompare $vivado_version 2027] >= 0 } {
+    error "ERROR: Vivado 2022.2 to 2026.x is required. Detected: $vivado_version"
 }
+
+if { ![info exists jobs] } { set jobs 16 }
+set_param general.maxThreads [expr {min($jobs, 32)}]
 
 set script_dir [file dirname [info script]]
 source [file join $script_dir utils.tcl]
@@ -26,6 +29,13 @@ if { $board_part ne "" } {
 }
 
 add_files $source_files
+# `include resolves against the source directories; headers are not compiled on their own
+if { [info exists include_dirs] } {
+    set_property include_dirs $include_dirs [current_fileset]
+}
+foreach f [get_files -quiet -of_objects [current_fileset] {*.h *.vh *.svh}] {
+    set_property file_type {Verilog Header} $f
+}
 if { $verilog_defines ne "" } {
     set_property verilog_define $verilog_defines [current_fileset]
 }

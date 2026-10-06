@@ -63,16 +63,16 @@ set_property NAME impl_base [get_runs impl_1]
 set_property PR_CONFIGURATION config_base [get_runs impl_base]
 
 foreach vc $variant_configs {
-    create_run impl_${vc} -parent_run impl_base -flow {Vivado Implementation 2022} -pr_config config_${vc}
+    create_run impl_${vc} -parent_run impl_base -flow [get_property FLOW [get_runs impl_base]] -pr_config config_${vc}
 }
 
-launch_runs synth_1 -jobs 16
+launch_runs synth_1 -jobs $jobs
 wait_on_runs synth_1
-launch_runs impl_base -to_step write_bitstream -jobs 16
+launch_runs impl_base -to_step write_bitstream -jobs $jobs
 wait_on_run impl_base
 
 foreach vc $variant_configs {
-    launch_runs impl_${vc} -to_step write_bitstream -jobs 16
+    launch_runs impl_${vc} -to_step write_bitstream -jobs $jobs
     wait_on_run impl_${vc}
 }
 

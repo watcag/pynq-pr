@@ -16,7 +16,7 @@ from .boards import load_board
 from .floorplan import write_pblocks_xdc
 
 
-def generate_tcl_config(config, board, root_dir, proj_dir, bits_dir, pblocks_xdc):
+def generate_tcl_config(config, board, root_dir, proj_dir, bits_dir, pblocks_xdc, jobs=16):
     """Generate build_config.tcl content from the parsed YAML config."""
     lines = []
 
@@ -31,6 +31,7 @@ def generate_tcl_config(config, board, root_dir, proj_dir, bits_dir, pblocks_xdc
     tcl_set("axis_switch", "1" if config.get("axis_switch") else "0")
     tcl_set("versatile_freq", config.get("_versatile_freq", 100))
     tcl_set("data_freq", config.get("_data_freq", 100))
+    tcl_set("jobs", jobs)
     tcl_set("proj_dir", str(proj_dir))
     tcl_set("bits_dir", str(bits_dir))
     tcl_set("pblocks_xdc", str(pblocks_xdc.resolve()))
@@ -44,6 +45,8 @@ def generate_tcl_config(config, board, root_dir, proj_dir, bits_dir, pblocks_xdc
 
     source_list = " ".join(f'"{s}"' for s in all_sources)
     lines.append(f"set source_files [list {source_list}]")
+    include_dirs = list(dict.fromkeys(str(Path(s).parent) for s in all_sources))
+    lines.append("set include_dirs [list " + " ".join(f'"{d}"' for d in include_dirs) + "]")
 
     defines = config.get("defines", {})
     if defines:
@@ -89,7 +92,7 @@ def generate_tcl_config(config, board, root_dir, proj_dir, bits_dir, pblocks_xdc
     return "\n".join(lines) + "\n"
 
 
-def build(config_path, force=False):
+def build(config_path, force=False, jobs=16):
     """Load config, generate build_config.tcl, and invoke Vivado."""
     root_dir = Path.cwd()
     config = load_config(config_path)
@@ -114,7 +117,7 @@ def build(config_path, force=False):
         config["project"], proj_dir,
     )
 
-    tcl_content = generate_tcl_config(config, board, root_dir, proj_dir, bits_dir, pblocks_xdc)
+    tcl_content = generate_tcl_config(config, board, root_dir, proj_dir, bits_dir, pblocks_xdc, jobs)
     config_tcl_path = proj_dir / "build_config.tcl"
     config_tcl_path.write_text(tcl_content)
 
@@ -122,7 +125,7 @@ def build(config_path, force=False):
     build_script = scripts_dir / "build.tcl"
 
     cmd = [
-        "vivado", "-mode", "tcl",
+        "vivado", "-mode", "batch",
         "-source", str(build_script.resolve()),
         "-tclargs", str(config_tcl_path.resolve()),
     ]
