@@ -122,7 +122,7 @@ def build(config_path, force=False):
     build_script = scripts_dir / "build.tcl"
 
     cmd = [
-        "vivado", "-mode", "tcl",
+        "vivado", "-mode", "batch",
         "-source", str(build_script.resolve()),
         "-tclargs", str(config_tcl_path.resolve()),
     ]

@@ -1,6 +1,6 @@
 # build.tcl — Top-level entry point for the pynq-pr Vivado DFX build flow.
 #
-# Invoked by the Python CLI via: vivado -mode tcl -source build.tcl -tclargs build_config.tcl
+# Invoked by the Python CLI via: vivado -mode batch -source build.tcl -tclargs build_config.tcl
 #
 # This script creates a Vivado project, adds RTL sources, sources the
 # user/shipped base block design, then runs the DFX flow in four stages:
