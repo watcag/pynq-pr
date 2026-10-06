@@ -18,7 +18,7 @@ Example
 
 import os
 
-from pynq import DefaultHierarchy, DefaultIP, Overlay as _PynqOverlay, PL
+from pynq import Clocks, DefaultHierarchy, DefaultIP, Overlay as _PynqOverlay, PL
 from pynq.lib import AxiGPIO
 
 
@@ -143,12 +143,29 @@ class Overlay(_PynqOverlay):
         self._icap_cache = {}
         self._fpga_mgr_cache = {}
 
-        # Build a map from partition name to bit_index by parsing the HWH for
-        # decouple_<name> xlslice DIN_FROM parameters — authoritative hardware mapping.
         import xml.etree.ElementTree as ET
         hwh_path = bitfile_name.replace(".bit", ".hwh")
+        hwh = ET.parse(hwh_path)
+
+        # PYNQ copies only the PL clock divisors from the HWH, so the clocks
+        # are wrong when the board's source PLL differs from the design's
+        # (the KV260 boots with IOPLL at 1500 MHz). Set them by frequency,
+        # which computes the divisors from the live PLL.
+        if download:
+            params = {p.get("NAME"): p.get("VALUE") for p in hwh.iter("PARAMETER")}
+            for i in range(4):
+                if params.get(f"PSU__FPGA_PL{i}_ENABLE") == "1":
+                    mhz = params[f"PSU__CRL_APB__PL{i}_REF_CTRL__FREQMHZ"]
+                elif params.get(f"PCW_EN_CLK{i}_PORT") == "1":
+                    mhz = params[f"PCW_FPGA{i}_PERIPHERAL_FREQMHZ"]
+                else:
+                    continue
+                setattr(Clocks, f"fclk{i}_mhz", float(mhz))
+
+        # Build a map from partition name to bit_index by parsing the HWH for
+        # decouple_<name> xlslice DIN_FROM parameters — authoritative hardware mapping.
         decouple_bits = {}
-        for m in ET.parse(hwh_path).iter("MODULE"):
+        for m in hwh.iter("MODULE"):
             if m.get("MODTYPE") == "xlslice":
                 inst = m.get("INSTANCE", "")
                 if inst.startswith("decouple_"):
