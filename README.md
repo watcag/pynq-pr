@@ -62,6 +62,7 @@ All paths are relative to the working directory:
 pynq-pr validate -c pr.yaml          # check config and source paths
 pynq-pr build -c pr.yaml             # synth -> impl -> bitstreams
 pynq-pr build -c pr.yaml --force     # overwrite existing output directory
+pynq-pr build -c pr.yaml -j 8        # Vivado jobs/threads (default 16)
 ```
 
 Output lands in `output/<project>/bits/`: one static bitstream (`<project>.bit`), one partial bitstream per module (`<partition>_<cell_name>.bit`), plus matching `.hwh` files.

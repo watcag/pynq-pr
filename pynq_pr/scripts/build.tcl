@@ -17,6 +17,9 @@ if { [package vcompare $vivado_version 2022.2] < 0 || [package vcompare $vivado_
     error "ERROR: Vivado 2022.2 to 2026.x is required. Detected: $vivado_version"
 }
 
+if { ![info exists jobs] } { set jobs 16 }
+set_param general.maxThreads [expr {min($jobs, 32)}]
+
 set script_dir [file dirname [info script]]
 source [file join $script_dir utils.tcl]
 
