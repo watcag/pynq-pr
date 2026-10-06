@@ -11,10 +11,10 @@
 set config_file [lindex $argv 0]
 source $config_file
 
-#do not use vivado 2022.1, DFX doesn't seem to work properly
+# Vivado 2022.2 to 2026.x. Do not use 2022.1: DFX doesn't work properly there.
 set vivado_version [version -short]
-if { $vivado_version ne "2022.2" } {
-    error "ERROR: Vivado 2022.2 is required. Detected: $vivado_version"
+if { [package vcompare $vivado_version 2022.2] < 0 || [package vcompare $vivado_version 2027] >= 0 } {
+    error "ERROR: Vivado 2022.2 to 2026.x is required. Detected: $vivado_version"
 }
 
 set script_dir [file dirname [info script]]

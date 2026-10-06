@@ -19,7 +19,7 @@ This also installs cocotbpynq for simulation. Update with `git pull` followed by
 | Tool | Needed for | Version |
 |---|---|---|
 | Python | everything | 3.10+ |
-| Vivado (+ Vitis HLS for the vision example) | `pynq-pr build` | `build.tcl` currently requires 2022.2 |
+| Vivado (+ Vitis HLS for the vision example) | `pynq-pr build` | 2022.2 to 2026.x (`build.tcl` checks); tested 2022.2–2025.1 |
 | Verilator | `pynq-pr sim` | 5.036+ (the `verilator` wheel from PyPI works; `apt` versions are too old) |
 | PYNQ image on the board | running the bitstreams | v3.0.1 (PYNQ-Z1), Kria-PYNQ v3.0.1 (KV260) |
 

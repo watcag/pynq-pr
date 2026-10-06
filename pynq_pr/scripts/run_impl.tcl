@@ -63,7 +63,7 @@ set_property NAME impl_base [get_runs impl_1]
 set_property PR_CONFIGURATION config_base [get_runs impl_base]
 
 foreach vc $variant_configs {
-    create_run impl_${vc} -parent_run impl_base -flow {Vivado Implementation 2022} -pr_config config_${vc}
+    create_run impl_${vc} -parent_run impl_base -flow [get_property FLOW [get_runs impl_base]] -pr_config config_${vc}
 }
 
 launch_runs synth_1 -jobs 16
