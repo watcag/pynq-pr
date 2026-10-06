@@ -73,6 +73,9 @@ Output lands in `output/<project>/bits/`: one static bitstream (`<project>.bit`)
 |-------|---------|-------------|
 | `reconfiguration_method` | `pcap` | `pcap` or `icap`. |
 | `defines` | none | Dict of Verilog `` `define `` values applied project-wide. |
+| `data_freq` | `100` | PL clock (MHz) of the RPs, DMAs and interconnects. |
+| `stream_width` | `32` | RP AXI4-Stream TDATA width (`x_TDATA`/`y_TDATA`, DMA streams, decouplers). `pynq-pr sim` supports 32 only. |
+| `dma_burst` | `16` | AXI DMA maximum burst length (beats, 2 to 256), both channels. |
 
 ### RTL interface requirements
 

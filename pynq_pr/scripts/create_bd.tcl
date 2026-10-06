@@ -133,6 +133,9 @@ proc add_versatile {clk_net versatile_clk_src versatile_freq resetn_net resetn_e
     connect_bd_net [get_bd_pins icap_rst_system/peripheral_aresetn]      [get_bd_pins versatile/icap_rstn]
 }
 
+if { ![info exists stream_width] } { set stream_width 32 }
+if { ![info exists dma_burst] }    { set dma_burst 16 }
+
 set design_name $project_name
 create_bd_design $design_name
 
@@ -212,12 +215,14 @@ for {set j 0} {$j < $num_si} {incr j} {
 }
 
 # DFX decoupler interface config (same for all RPs and matches dummy.v boundary)
-set dfx_all_params {INTF {mm_saxis {ID 0 VLNV xilinx.com:interface:axis_rtl:1.0 MODE slave SIGNALS \
-    {TVALID {PRESENT 1 WIDTH 1} TREADY {PRESENT 1 WIDTH 1} TDATA {PRESENT 1 WIDTH 32} TLAST {PRESENT 1 WIDTH 1 DECOUPLED 1} \
-    TUSER {PRESENT 0 WIDTH 0} TID {PRESENT 0 WIDTH 0} TDEST {PRESENT 0 WIDTH 0} TSTRB {PRESENT 0 WIDTH 4} TKEEP {PRESENT 1 WIDTH 4}}} \
+set sw $stream_width
+set sk [expr {$stream_width / 8}]
+set dfx_all_params [subst -nocommands {INTF {mm_saxis {ID 0 VLNV xilinx.com:interface:axis_rtl:1.0 MODE slave SIGNALS \
+    {TVALID {PRESENT 1 WIDTH 1} TREADY {PRESENT 1 WIDTH 1} TDATA {PRESENT 1 WIDTH $sw} TLAST {PRESENT 1 WIDTH 1 DECOUPLED 1} \
+    TUSER {PRESENT 0 WIDTH 0} TID {PRESENT 0 WIDTH 0} TDEST {PRESENT 0 WIDTH 0} TSTRB {PRESENT 0 WIDTH $sk} TKEEP {PRESENT 1 WIDTH $sk}}} \
     mm_maxis {ID 1 VLNV xilinx.com:interface:axis_rtl:1.0 SIGNALS {TVALID {PRESENT 1 WIDTH 1} TREADY {PRESENT 1 WIDTH 1} TDATA \
-    {PRESENT 1 WIDTH 32} TLAST {PRESENT 1 WIDTH 1} TUSER {PRESENT 0 WIDTH 0} TID {PRESENT 0 WIDTH 0} TDEST {PRESENT 0 WIDTH 0} \
-    TSTRB {PRESENT 0 WIDTH 4} TKEEP {PRESENT 0 WIDTH 4}}} AXILiteS \
+    {PRESENT 1 WIDTH $sw} TLAST {PRESENT 1 WIDTH 1} TUSER {PRESENT 0 WIDTH 0} TID {PRESENT 0 WIDTH 0} TDEST {PRESENT 0 WIDTH 0} \
+    TSTRB {PRESENT 0 WIDTH $sk} TKEEP {PRESENT 0 WIDTH $sk}}} AXILiteS \
     {ID 2 VLNV xilinx.com:interface:aximm_rtl:1.0 MODE slave PROTOCOL AXI4LITE SIGNALS {ARVALID {PRESENT 1 WIDTH 1} ARREADY \
     {PRESENT 1 WIDTH 1} AWVALID {PRESENT 1 WIDTH 1} AWREADY {PRESENT 1 WIDTH 1} BVALID {PRESENT 1 WIDTH 1} BREADY \
     {PRESENT 1 WIDTH 1} RVALID {PRESENT 1 WIDTH 1} RREADY {PRESENT 1 WIDTH 1} WVALID {PRESENT 1 WIDTH 1} WREADY \
@@ -229,7 +234,7 @@ set dfx_all_params {INTF {mm_saxis {ID 0 VLNV xilinx.com:interface:axis_rtl:1.0 
     {PRESENT 1 WIDTH 2} RLAST {PRESENT 0 WIDTH 1} AWID {WIDTH 0 PRESENT 0} AWREGION {WIDTH 4 PRESENT 0} AWQOS \
     {WIDTH 4 PRESENT 0} AWUSER {WIDTH 0 PRESENT 0} WID {WIDTH 0 PRESENT 0} WUSER {WIDTH 0 PRESENT 0} BID \
     {WIDTH 0 PRESENT 0} BUSER {WIDTH 0 PRESENT 0} ARID {WIDTH 0 PRESENT 0} ARREGION {WIDTH 4 PRESENT 0} ARQOS \
-    {WIDTH 4 PRESENT 0} ARUSER {WIDTH 0 PRESENT 0} RID {WIDTH 0 PRESENT 0} RUSER {WIDTH 0 PRESENT 0}}}} IPI_PROP_COUNT 2}
+    {WIDTH 4 PRESENT 0} ARUSER {WIDTH 0 PRESENT 0} RID {WIDTH 0 PRESENT 0} RUSER {WIDTH 0 PRESENT 0}}}} IPI_PROP_COUNT 2}]
 
 # Create per-RP hierarchies
 for {set i 0} {$i < $num_rps} {incr i} {
@@ -262,12 +267,16 @@ for {set i 0} {$i < $num_rps} {incr i} {
 
     # AXI DMA
     set dma [create_bd_cell -type ip -vlnv xilinx.com:ip:axi_dma dma]
+    # MM2S memory side stays 64 bits for 32-bit streams (as before); S2MM matches the stream
+    set mm_width [expr {max(64, $stream_width)}]
     set_property -dict [list \
         CONFIG.c_include_sg {0} \
-        CONFIG.c_m_axi_mm2s_data_width {64} \
-        CONFIG.c_m_axis_mm2s_tdata_width {32} \
-        CONFIG.c_s_axis_s2mm_tdata_width {32} \
-        CONFIG.c_mm2s_burst_size {16} \
+        CONFIG.c_m_axi_mm2s_data_width $mm_width \
+        CONFIG.c_m_axi_s2mm_data_width $stream_width \
+        CONFIG.c_m_axis_mm2s_tdata_width $stream_width \
+        CONFIG.c_s_axis_s2mm_tdata_width $stream_width \
+        CONFIG.c_mm2s_burst_size $dma_burst \
+        CONFIG.c_s2mm_burst_size $dma_burst \
         CONFIG.c_sg_length_width {26} \
     ] $dma
 
@@ -281,6 +290,7 @@ for {set i 0} {$i < $num_rps} {incr i} {
 
     # Dummy placeholder
     set dummy [create_bd_cell -type module -reference dummy dummy]
+    set_property CONFIG.WIDTH $stream_width $dummy
 
     # Decoupler <-> Dummy connections (always present)
     connect_bd_intf_net [get_bd_intf_pins decoupler/rp_mm_saxis] [get_bd_intf_pins dummy/x]

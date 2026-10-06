@@ -52,6 +52,13 @@ def validate(config, root_dir):
                 raise ValueError(f"Duplicate cell_name in partition '{pname}': {rm['cell_name']}")
             seen_cells.add(rm["cell_name"])
 
+    width = config.get("stream_width", 32)
+    if width not in (32, 64, 128, 256, 512, 1024):
+        raise ValueError(f"stream_width must be 32, 64, 128, 256, 512 or 1024, got {width}")
+    burst = config.get("dma_burst", 16)
+    if burst not in (2, 4, 8, 16, 32, 64, 128, 256):
+        raise ValueError(f"dma_burst must be a power of two from 2 to 256, got {burst}")
+
     for src in config["sources"]:
         if not (root_dir / src).exists():
             raise FileNotFoundError(f"Source not found: {root_dir / src}")
@@ -62,7 +69,9 @@ def apply_defaults(config, root_dir):
     config["reconfiguration_method"] = method
     config.setdefault("axis_switch", False)
     config.setdefault("_versatile_freq", 100)  # ICAP runs at 2x this frequency
-    config.setdefault("_data_freq", 100)
+    config.setdefault("data_freq", 100)        # MHz, PL clock of the RPs, DMAs and interconnects
+    config.setdefault("stream_width", 32)      # RP AXI4-Stream TDATA bits
+    config.setdefault("dma_burst", 16)         # AXI DMA max burst length (beats)
 
     dummy_path = str(PKG_DIR / "rtl" / "dummy.v")
     if "sources" not in config:

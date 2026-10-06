@@ -199,6 +199,8 @@ def generate_sim_config(config_path, force=False):
     root_dir = Path.cwd()
     config = load_config(config_path)
     project = config['project']
+    if config['stream_width'] != 32:
+        raise NotImplementedError("pynq-pr sim supports stream_width 32 only")
 
     sim_dir = root_dir / 'sim' / project
     if sim_dir.exists():
