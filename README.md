@@ -76,6 +76,7 @@ Output lands in `output/<project>/bits/`: one static bitstream (`<project>.bit`)
 | `data_freq` | `100` | PL clock (MHz) of the RPs, DMAs and interconnects. |
 | `stream_width` | `32` | RP AXI4-Stream TDATA width (`x_TDATA`/`y_TDATA`, DMA streams, decouplers). `pynq-pr sim` supports 32 only. |
 | `reconfigurable_regions` | board default | Clock regions shared out among the partitions (the rest stay static), e.g. `[X0Y1, X0Y2, X0Y3, X1Y1, X1Y2, X1Y3, X2Y1, X2Y2, X2Y3]` on the KV260 keeps the whole bottom row static. |
+| `regions` (per partition) | split of `reconfigurable_regions` | Clock regions of this partition, e.g. `regions: [X1Y2, X2Y2, X0Y3, X1Y3, X2Y3]`; give it for every partition to choose the split yourself (block RAM and URAM sit in some columns only). |
 | `dma_burst` | `16` | AXI DMA maximum burst length (beats, 2 to 256), both channels. |
 | `streams` | `1` | Stream pairs per partition, each with its own AXI DMA: pair 0 is `x`/`y` on HP0, pair 1 is `x1`/`y1` (DMA `dma1`) on HP1. `2` needs `pcap` and no `axis_switch`. |
 
