@@ -30,7 +30,10 @@ def generate_tcl_config(config, board, root_dir, proj_dir, bits_dir, pblocks_xdc
     tcl_set("board_name", config["board"])
     tcl_set("axis_switch", "1" if config.get("axis_switch") else "0")
     tcl_set("versatile_freq", config.get("_versatile_freq", 100))
-    tcl_set("data_freq", config.get("_data_freq", 100))
+    tcl_set("data_freq", config["data_freq"])
+    tcl_set("stream_width", config["stream_width"])
+    tcl_set("dma_burst", config["dma_burst"])
+    tcl_set("streams", config["streams"])
     tcl_set("jobs", jobs)
     tcl_set("proj_dir", str(proj_dir))
     tcl_set("bits_dir", str(bits_dir))
@@ -97,6 +100,9 @@ def build(config_path, force=False, jobs=16):
     root_dir = Path.cwd()
     config = load_config(config_path)
     board = load_board(config["board"])
+    if config.get("reconfigurable_regions"):
+        board = dict(board, reconfigurable_regions=config["reconfigurable_regions"])
+        board.pop("reconfigurable_regions_lte2", None)
 
     proj_dir = root_dir / "output" / config["project"]
 
@@ -147,6 +153,7 @@ def validate_config(config_path):
     print(f"Method:      {config['reconfiguration_method']}")
     if config.get("axis_switch"):
         print(f"RP Switch:   enabled")
+    print(f"Data clock:  {config['data_freq']} MHz, stream {config['stream_width']} bits, DMA burst {config['dma_burst']}")
     print(f"Partitions:  {len(config['reconfigurable_partitions'])}")
     for part in config["reconfigurable_partitions"]:
         print(f"  {part['partition_name']}:")

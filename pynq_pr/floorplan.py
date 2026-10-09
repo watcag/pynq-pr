@@ -92,6 +92,8 @@ def _find_hamiltonian_path(regions, adj):
 def generate_pblocks_xdc(board, partitions, design_name):
     resources = board["pblock_resources"]
     n = len(partitions)
+    if all("regions" in p for p in partitions):   # explicit split: each partition names its clock regions
+        return _pblocks(resources, partitions, [p["regions"] for p in partitions], design_name)
     if n <= 2 and "reconfigurable_regions_lte2" in board:
         regions = list(board["reconfigurable_regions_lte2"])
     else:
@@ -131,6 +133,10 @@ def generate_pblocks_xdc(board, partitions, design_name):
         groups.append(path[idx:idx + count])
         idx += count
 
+    return _pblocks(resources, partitions, groups, design_name)
+
+
+def _pblocks(resources, partitions, groups, design_name):
     lines = []
     for i, part in enumerate(partitions):
         pname = part["partition_name"]

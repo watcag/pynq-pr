@@ -45,6 +45,13 @@ BOUNDARY_PORTS = [
     {'name': 's_axi_AXILiteS_BRESP',        'direction': 'from_rm', 'width': 2},
 ]
 
+
+def _boundary_ports(streams):
+    """BOUNDARY_PORTS plus x<k>_/y<k>_ stream pairs for k = 1 .. streams-1."""
+    extra = [dict(p, name=f"{p['name'][0]}{k}{p['name'][1:]}")
+             for k in range(1, streams) for p in BOUNDARY_PORTS if p['name'][:2] in ('x_', 'y_')]
+    return BOUNDARY_PORTS + extra
+
 DMA_BASE_ADDR = 0x40400000
 DMA_ADDR_RANGE = 0x10000
 SWITCH_BASE_ADDR = 0x44A00000
@@ -90,8 +97,9 @@ def _split_sim_sources_and_includes(sources_abs):
 def _build_cocotbpynq_yaml(config, sim_sources_abs, include_dirs, root_dir):
     """Build the cocotbpynq YAML dict from a pynq-pr config."""
     partitions = config['reconfigurable_partitions']
+    streams = config.get('streams', 1)
 
-    # Static region interfaces (one DMA per partition)
+    # Static region interfaces (one DMA per partition and stream)
     interfaces = {}
     if config.get('axis_switch'):
         interfaces['switch_ctrl'] = {
@@ -127,6 +135,13 @@ def _build_cocotbpynq_yaml(config, sim_sources_abs, include_dirs, root_dir):
             'dw': 32,
             'dma_instance': dma,
         }
+        # stream k > 0: DMA dma<k> to the RM's x<k>/y<k>; cocotbpynq groups a partition's DMAs by 'partition'
+        if streams > 1:
+            interfaces[f'x_{pname}']['partition'] = interfaces[f'y_{pname}']['partition'] = pname
+        for k in range(1, streams):
+            interfaces[f'x{k}_{pname}'] = dict(interfaces[f'x_{pname}'], dma_instance=f'{dma}{k}',
+                                               base_addr=DMA_BASE_ADDR + (k * len(partitions) + i) * DMA_ADDR_RANGE)
+            interfaces[f'y{k}_{pname}'] = dict(interfaces[f'y_{pname}'], dma_instance=f'{dma}{k}')
 
     # Partition definitions
     part_defs = []
@@ -138,7 +153,7 @@ def _build_cocotbpynq_yaml(config, sim_sources_abs, include_dirs, root_dir):
             'name': pname,
             'rm_module': first_rm['top'],
             'clock': 'clk',
-            'boundary': BOUNDARY_PORTS,
+            'boundary': _boundary_ports(streams),
             'initial_rm': initial_rm,
         })
 
@@ -199,6 +214,8 @@ def generate_sim_config(config_path, force=False):
     root_dir = Path.cwd()
     config = load_config(config_path)
     project = config['project']
+    if config['stream_width'] != 32:
+        raise NotImplementedError("pynq-pr sim supports stream_width 32 only")
 
     sim_dir = root_dir / 'sim' / project
     if sim_dir.exists():

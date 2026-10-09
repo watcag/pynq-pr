@@ -133,6 +133,10 @@ proc add_versatile {clk_net versatile_clk_src versatile_freq resetn_net resetn_e
     connect_bd_net [get_bd_pins icap_rst_system/peripheral_aresetn]      [get_bd_pins versatile/icap_rstn]
 }
 
+if { ![info exists stream_width] } { set stream_width 32 }
+if { ![info exists dma_burst] }    { set dma_burst 16 }
+if { ![info exists streams] }      { set streams 1 }
+
 set design_name $project_name
 create_bd_design $design_name
 
@@ -152,6 +156,9 @@ if {$axis_switch eq "1"} {
 } else {
     set num_mi [expr {2 * $num_rps + 1}]
 }
+# streams > 1: one more master per extra DMA, after the others (stream k of RP i at mi_extra + i*(streams-1) + k-1)
+set mi_extra $num_mi
+set num_mi [expr {$num_mi + $num_rps * ($streams - 1)}]
 set rps_axi_periph [create_bd_cell -type ip -vlnv xilinx.com:ip:axi_interconnect rps_axi_periph]
 set_property CONFIG.NUM_MI $num_mi $rps_axi_periph
 
@@ -211,13 +218,29 @@ for {set j 0} {$j < $num_si} {incr j} {
     connect_bd_net $resetn_net [get_bd_pins rps_interconnect/S${si}_ARESETN]
 }
 
+# Stream k > 0 of every RP: its own interconnect to HP<k>
+for {set k 1} {$k < $streams} {incr k} {
+    set ic [create_bd_cell -type ip -vlnv xilinx.com:ip:axi_interconnect rps_interconnect$k]
+    set_property -dict [list CONFIG.NUM_SI $num_si CONFIG.NUM_MI {1}] $ic
+    connect_bd_intf_net [get_bd_intf_pins rps_interconnect$k/M00_AXI] [set hp${k}_intf]
+    foreach p {ACLK M00_ACLK} { connect_bd_net $clk_net [get_bd_pins rps_interconnect$k/$p] }
+    foreach p {ARESETN M00_ARESETN} { connect_bd_net $resetn_net [get_bd_pins rps_interconnect$k/$p] }
+    for {set j 0} {$j < $num_si} {incr j} {
+        set si [format "%02d" $j]
+        connect_bd_net $clk_net    [get_bd_pins rps_interconnect$k/S${si}_ACLK]
+        connect_bd_net $resetn_net [get_bd_pins rps_interconnect$k/S${si}_ARESETN]
+    }
+}
+
 # DFX decoupler interface config (same for all RPs and matches dummy.v boundary)
-set dfx_all_params {INTF {mm_saxis {ID 0 VLNV xilinx.com:interface:axis_rtl:1.0 MODE slave SIGNALS \
-    {TVALID {PRESENT 1 WIDTH 1} TREADY {PRESENT 1 WIDTH 1} TDATA {PRESENT 1 WIDTH 32} TLAST {PRESENT 1 WIDTH 1 DECOUPLED 1} \
-    TUSER {PRESENT 0 WIDTH 0} TID {PRESENT 0 WIDTH 0} TDEST {PRESENT 0 WIDTH 0} TSTRB {PRESENT 0 WIDTH 4} TKEEP {PRESENT 1 WIDTH 4}}} \
+set sw $stream_width
+set sk [expr {$stream_width / 8}]
+set dfx_all_params [subst -nocommands {INTF {mm_saxis {ID 0 VLNV xilinx.com:interface:axis_rtl:1.0 MODE slave SIGNALS \
+    {TVALID {PRESENT 1 WIDTH 1} TREADY {PRESENT 1 WIDTH 1} TDATA {PRESENT 1 WIDTH $sw} TLAST {PRESENT 1 WIDTH 1 DECOUPLED 1} \
+    TUSER {PRESENT 0 WIDTH 0} TID {PRESENT 0 WIDTH 0} TDEST {PRESENT 0 WIDTH 0} TSTRB {PRESENT 0 WIDTH $sk} TKEEP {PRESENT 1 WIDTH $sk}}} \
     mm_maxis {ID 1 VLNV xilinx.com:interface:axis_rtl:1.0 SIGNALS {TVALID {PRESENT 1 WIDTH 1} TREADY {PRESENT 1 WIDTH 1} TDATA \
-    {PRESENT 1 WIDTH 32} TLAST {PRESENT 1 WIDTH 1} TUSER {PRESENT 0 WIDTH 0} TID {PRESENT 0 WIDTH 0} TDEST {PRESENT 0 WIDTH 0} \
-    TSTRB {PRESENT 0 WIDTH 4} TKEEP {PRESENT 0 WIDTH 4}}} AXILiteS \
+    {PRESENT 1 WIDTH $sw} TLAST {PRESENT 1 WIDTH 1} TUSER {PRESENT 0 WIDTH 0} TID {PRESENT 0 WIDTH 0} TDEST {PRESENT 0 WIDTH 0} \
+    TSTRB {PRESENT 0 WIDTH $sk} TKEEP {PRESENT 0 WIDTH $sk}}} AXILiteS \
     {ID 2 VLNV xilinx.com:interface:aximm_rtl:1.0 MODE slave PROTOCOL AXI4LITE SIGNALS {ARVALID {PRESENT 1 WIDTH 1} ARREADY \
     {PRESENT 1 WIDTH 1} AWVALID {PRESENT 1 WIDTH 1} AWREADY {PRESENT 1 WIDTH 1} BVALID {PRESENT 1 WIDTH 1} BREADY \
     {PRESENT 1 WIDTH 1} RVALID {PRESENT 1 WIDTH 1} RREADY {PRESENT 1 WIDTH 1} WVALID {PRESENT 1 WIDTH 1} WREADY \
@@ -229,7 +252,16 @@ set dfx_all_params {INTF {mm_saxis {ID 0 VLNV xilinx.com:interface:axis_rtl:1.0 
     {PRESENT 1 WIDTH 2} RLAST {PRESENT 0 WIDTH 1} AWID {WIDTH 0 PRESENT 0} AWREGION {WIDTH 4 PRESENT 0} AWQOS \
     {WIDTH 4 PRESENT 0} AWUSER {WIDTH 0 PRESENT 0} WID {WIDTH 0 PRESENT 0} WUSER {WIDTH 0 PRESENT 0} BID \
     {WIDTH 0 PRESENT 0} BUSER {WIDTH 0 PRESENT 0} ARID {WIDTH 0 PRESENT 0} ARREGION {WIDTH 4 PRESENT 0} ARQOS \
-    {WIDTH 4 PRESENT 0} ARUSER {WIDTH 0 PRESENT 0} RID {WIDTH 0 PRESENT 0} RUSER {WIDTH 0 PRESENT 0}}}} IPI_PROP_COUNT 2}
+    {WIDTH 4 PRESENT 0} ARUSER {WIDTH 0 PRESENT 0} RID {WIDTH 0 PRESENT 0} RUSER {WIDTH 0 PRESENT 0}}}} IPI_PROP_COUNT 2}]
+# streams > 1: stream pair k is decoupled as mm_saxis<k>/mm_maxis<k>, like mm_saxis/mm_maxis
+if {$streams > 1} {
+    set intf [dict get $dfx_all_params INTF]
+    for {set k 1} {$k < $streams} {incr k} {
+        dict set intf mm_saxis$k [dict replace [dict get $intf mm_saxis] ID [expr {2 * $k + 1}]]
+        dict set intf mm_maxis$k [dict replace [dict get $intf mm_maxis] ID [expr {2 * $k + 2}]]
+    }
+    dict set dfx_all_params INTF $intf
+}
 
 # Create per-RP hierarchies
 for {set i 0} {$i < $num_rps} {incr i} {
@@ -262,14 +294,19 @@ for {set i 0} {$i < $num_rps} {incr i} {
 
     # AXI DMA
     set dma [create_bd_cell -type ip -vlnv xilinx.com:ip:axi_dma dma]
-    set_property -dict [list \
+    # MM2S memory side stays 64 bits for 32-bit streams (as before); S2MM matches the stream
+    set mm_width [expr {max(64, $stream_width)}]
+    set dma_config [list \
         CONFIG.c_include_sg {0} \
-        CONFIG.c_m_axi_mm2s_data_width {64} \
-        CONFIG.c_m_axis_mm2s_tdata_width {32} \
-        CONFIG.c_s_axis_s2mm_tdata_width {32} \
-        CONFIG.c_mm2s_burst_size {16} \
+        CONFIG.c_m_axi_mm2s_data_width $mm_width \
+        CONFIG.c_m_axi_s2mm_data_width $stream_width \
+        CONFIG.c_m_axis_mm2s_tdata_width $stream_width \
+        CONFIG.c_s_axis_s2mm_tdata_width $stream_width \
+        CONFIG.c_mm2s_burst_size $dma_burst \
+        CONFIG.c_s2mm_burst_size $dma_burst \
         CONFIG.c_sg_length_width {26} \
-    ] $dma
+    ]
+    set_property -dict $dma_config $dma
 
     # DFX Decoupler
     set decoupler [create_bd_cell -type ip -vlnv xilinx.com:ip:dfx_decoupler decoupler]
@@ -281,6 +318,7 @@ for {set i 0} {$i < $num_rps} {incr i} {
 
     # Dummy placeholder
     set dummy [create_bd_cell -type module -reference dummy dummy]
+    set_property CONFIG.WIDTH $stream_width $dummy
 
     # Decoupler <-> Dummy connections (always present)
     connect_bd_intf_net [get_bd_intf_pins decoupler/rp_mm_saxis] [get_bd_intf_pins dummy/x]
@@ -313,7 +351,31 @@ for {set i 0} {$i < $num_rps} {incr i} {
     connect_bd_net [get_bd_pins rst_n]    [get_bd_pins dummy/rst_n]
     connect_bd_net [get_bd_pins decouple] [get_bd_pins decoupler/decouple]
 
+    # Stream pair k > 0: DMA dma<k> <-> decoupler mm_saxis<k>/mm_maxis<k> <-> RM x<k>/y<k>
+    for {set k 1} {$k < $streams} {incr k} {
+        create_bd_intf_pin -mode Slave  -vlnv xilinx.com:interface:aximm_rtl:1.0 S_AXI_LITE$k
+        create_bd_intf_pin -mode Master -vlnv xilinx.com:interface:aximm_rtl:1.0 M_AXI_MM2S$k
+        create_bd_intf_pin -mode Master -vlnv xilinx.com:interface:aximm_rtl:1.0 M_AXI_S2MM$k
+        set_property -dict $dma_config [create_bd_cell -type ip -vlnv xilinx.com:ip:axi_dma dma$k]
+        connect_bd_intf_net [get_bd_intf_pins dma$k/M_AXIS_MM2S]       [get_bd_intf_pins decoupler/s_mm_saxis$k]
+        connect_bd_intf_net [get_bd_intf_pins decoupler/s_mm_maxis$k]  [get_bd_intf_pins dma$k/S_AXIS_S2MM]
+        connect_bd_intf_net [get_bd_intf_pins decoupler/rp_mm_saxis$k] [get_bd_intf_pins dummy/x$k]
+        connect_bd_intf_net [get_bd_intf_pins dummy/y$k]               [get_bd_intf_pins decoupler/rp_mm_maxis$k]
+        connect_bd_intf_net [get_bd_intf_pins S_AXI_LITE$k]     [get_bd_intf_pins dma$k/S_AXI_LITE]
+        connect_bd_intf_net [get_bd_intf_pins dma$k/M_AXI_MM2S] [get_bd_intf_pins M_AXI_MM2S$k]
+        connect_bd_intf_net [get_bd_intf_pins dma$k/M_AXI_S2MM] [get_bd_intf_pins M_AXI_S2MM$k]
+        foreach p {s_axi_lite_aclk m_axi_mm2s_aclk m_axi_s2mm_aclk} { connect_bd_net [get_bd_pins clk] [get_bd_pins dma$k/$p] }
+        connect_bd_net [get_bd_pins rst_n] [get_bd_pins dma$k/axi_resetn]
+    }
+
     current_bd_instance $oldCurInst
+
+    for {set k 1} {$k < $streams} {incr k} {
+        set mi [format "%02d" [expr {$mi_extra + $i * ($streams - 1) + $k - 1}]]
+        connect_bd_intf_net [get_bd_intf_pins rps_axi_periph/M${mi}_AXI] [get_bd_intf_pins ${name}/S_AXI_LITE$k]
+        connect_bd_intf_net [get_bd_intf_pins ${name}/M_AXI_MM2S$k] [get_bd_intf_pins rps_interconnect$k/S${si_mm2s}_AXI]
+        connect_bd_intf_net [get_bd_intf_pins ${name}/M_AXI_S2MM$k] [get_bd_intf_pins rps_interconnect$k/S${si_s2mm}_AXI]
+    }
 
     # Connect hierarchy to top-level infrastructure
     connect_bd_intf_net [get_bd_intf_pins rps_axi_periph/M${mi_dma}_AXI] [get_bd_intf_pins ${name}/S_AXI_LITE]
@@ -351,8 +413,12 @@ for {set i 0} {$i < $num_rps} {incr i} {
 if {$reconfiguration_method eq "icap"} {
     add_versatile $clk_net $versatile_clk_src $versatile_freq $resetn_net $resetn_ext $gp0_intf $hp1_intf $hp1_aclk $board_name
 } else {
-    # HP1 enabled but unused in PCAP mode — connect clock for validation
-    connect_bd_net $versatile_clk_src $hp1_aclk
+    if {$streams > 1} {
+        connect_bd_net $clk_net $hp1_aclk   ;# HP1 carries stream 1
+    } else {
+        # HP1 enabled but unused in PCAP mode — connect clock for validation
+        connect_bd_net $versatile_clk_src $hp1_aclk
+    }
 }
 
 validate_bd_design
