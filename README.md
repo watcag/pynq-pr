@@ -171,6 +171,15 @@ preserves that absolute base; `control_aperture_bits` bounds native register
 capacity independently of wire width. Every alternative uses the same static
 window and DDR apertures.
 
+Vivado can omit register descriptions from standalone partial-BD HWH files.
+After a successful memory build, packaging completes missing descriptions from
+the configured IP's exported IP-XACT control map, matching its VLNV and slave
+interface and a zero-based control register block. This preserves the vendor
+HWH addresses and BDC identity and leaves
+existing register maps unchanged. PYNQ consumes its normal HWH format; pointer,
+field and response-monitor offsets are never inferred from the common aperture.
+Run `python3 -m pytest -q tests/test_hwh.py` for this packaging path.
+
 The caller must stop issuing work before calling `download`. Caller drain and
 static AXI shutdown acknowledgement are separate checks. The driver isolates
 control, requests shutdown, waits for acknowledgement, asserts RP reset, loads the
