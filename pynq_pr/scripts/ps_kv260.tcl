@@ -9,6 +9,11 @@ if { ![info exists versatile_freq] } { set versatile_freq 100 }
 if { ![info exists data_freq] }      { set data_freq 100 }
 
 set ps [create_bd_cell -type ip -vlnv xilinx.com:ip:zynq_ultra_ps_e ps]
+# Start from the KV260 board preset so the PL clocks come from the same PLL
+# (IOPLL) the board boots with: PYNQ programs only the PL clock divisors from
+# the .hwh, so divisors computed for another source PLL give a different
+# runtime clock than the one Vivado timed.
+apply_bd_automation -rule xilinx.com:bd_rule:zynq_ultra_ps_e -config {apply_board_preset "1"} $ps
 set_property -dict [list \
     CONFIG.PSU__FPGA_PL0_ENABLE {1} \
     CONFIG.PSU__CRL_APB__PL0_REF_CTRL__FREQMHZ $data_freq \

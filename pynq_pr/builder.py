@@ -16,7 +16,7 @@ from .boards import load_board
 from .floorplan import write_pblocks_xdc
 
 
-def generate_tcl_config(config, board, root_dir, proj_dir, bits_dir, pblocks_xdc, jobs=16):
+def generate_tcl_config(config, board, root_dir, proj_dir, bits_dir, pblocks_xdc, jobs=16, validate_only=False):
     """Generate build_config.tcl content from the parsed YAML config."""
     lines = []
 
@@ -30,7 +30,14 @@ def generate_tcl_config(config, board, root_dir, proj_dir, bits_dir, pblocks_xdc
     tcl_set("board_name", config["board"])
     tcl_set("axis_switch", "1" if config.get("axis_switch") else "0")
     tcl_set("versatile_freq", config.get("_versatile_freq", 100))
-    tcl_set("data_freq", config.get("_data_freq", 100))
+    tcl_set("data_freq", config["data_freq"])
+    tcl_set("stream_width", config["stream_width"])
+    tcl_set("dma_burst", config["dma_burst"])
+    tcl_set("streams", config["streams"])
+    tcl_set("rp_interface", config["interface"])
+    tcl_set("memory_data_width", config["memory_data_width"])
+    tcl_set("control_aperture_bits", config["control_aperture_bits"])
+    tcl_set("validate_only", int(validate_only))
     tcl_set("jobs", jobs)
     tcl_set("proj_dir", str(proj_dir))
     tcl_set("bits_dir", str(bits_dir))
@@ -42,6 +49,9 @@ def generate_tcl_config(config, board, root_dir, proj_dir, bits_dir, pblocks_xdc
         resolved = str(src_path.resolve() if src_path.is_absolute() else (root_dir / src).resolve())
         if resolved not in all_sources:
             all_sources.append(resolved)
+
+    repos = [str((root_dir / path).resolve()) for path in config.get("ip_repositories", [])]
+    lines.append("set ip_repositories [list " + " ".join(f'"{path}"' for path in repos) + "]")
 
     source_list = " ".join(f'"{s}"' for s in all_sources)
     lines.append(f"set source_files [list {source_list}]")
@@ -73,7 +83,7 @@ def generate_tcl_config(config, board, root_dir, proj_dir, bits_dir, pblocks_xdc
                 params_tcl = "[dict create]"
             rm_list_items.append(
                 f'[dict create cell_name "{rm["cell_name"]}" '
-                f'top "{rm["top"]}" '
+                f'top "{rm.get("top", "")}" vlnv "{rm.get("vlnv", "")}" '
                 f"parameters {params_tcl}]"
             )
 
@@ -89,14 +99,24 @@ def generate_tcl_config(config, board, root_dir, proj_dir, bits_dir, pblocks_xdc
         lines.append(f"{part}{suffix}")
     lines.append("]")
 
+    static = []
+    for module in config.get("static_modules", []):
+        params = " ".join(f"{key} {{{value}}}" for key, value in module.get("parameters", {}).items())
+        static.append(f'[dict create cell_name "{module["cell_name"]}" vlnv "{module["vlnv"]}" '
+                      f'parameters [dict create {params}]]')
+    lines.append("set static_modules [list " + " ".join(static) + "]")
+
     return "\n".join(lines) + "\n"
 
 
-def build(config_path, force=False, jobs=16):
+def build(config_path, force=False, jobs=16, validate_only=False):
     """Load config, generate build_config.tcl, and invoke Vivado."""
     root_dir = Path.cwd()
     config = load_config(config_path)
     board = load_board(config["board"])
+    if config.get("reconfigurable_regions"):
+        board = dict(board, reconfigurable_regions=config["reconfigurable_regions"])
+        board.pop("reconfigurable_regions_lte2", None)
 
     proj_dir = root_dir / "output" / config["project"]
 
@@ -116,8 +136,14 @@ def build(config_path, force=False, jobs=16):
         board, config["reconfigurable_partitions"],
         config["project"], proj_dir,
     )
+    # Keep each fixed exported IP's complete boundary intact through opt_design,
+    # so the same source/physical interface can be exercised after routing.
+    with pblocks_xdc.open("a") as constraints:
+        for module in config["static_modules"]:
+            cell = f'{config["project"]}_i/{module["cell_name"]}'
+            constraints.write(f'set_property DONT_TOUCH true [get_cells [list {cell}]]\n')
 
-    tcl_content = generate_tcl_config(config, board, root_dir, proj_dir, bits_dir, pblocks_xdc, jobs)
+    tcl_content = generate_tcl_config(config, board, root_dir, proj_dir, bits_dir, pblocks_xdc, jobs, validate_only)
     config_tcl_path = proj_dir / "build_config.tcl"
     config_tcl_path.write_text(tcl_content)
 
@@ -133,7 +159,18 @@ def build(config_path, force=False, jobs=16):
     print(f"Config written to {config_tcl_path}")
     print(f"Running Vivado...")
     subprocess.run(cmd, cwd=str(proj_dir), check=True)
-    print(f"Done. Bitstreams in {bits_dir}/")
+    if not validate_only and config['interface'] == 'memory':
+        from .hwh import complete_registers
+        repositories = [(root_dir / path).resolve() for path in config.get('ip_repositories', [])]
+        for partition in config['reconfigurable_partitions']:
+            for module in partition['modules']:
+                if module.get('vlnv'):
+                    hwh = bits_dir / f"{partition['partition_name']}_{module['cell_name']}.hwh"
+                    complete_registers(hwh, module['vlnv'], repositories)
+    if validate_only:
+        print(f"Done. BD/source validation only in {proj_dir}; no qualified image.")
+    else:
+        print(f"Done. Bitstreams in {bits_dir}/")
 
 
 def validate_config(config_path):
@@ -147,11 +184,14 @@ def validate_config(config_path):
     print(f"Method:      {config['reconfiguration_method']}")
     if config.get("axis_switch"):
         print(f"RP Switch:   enabled")
+    print(f"Data clock:  {config['data_freq']} MHz, stream {config['stream_width']} bits, DMA burst {config['dma_burst']}")
     print(f"Partitions:  {len(config['reconfigurable_partitions'])}")
     for part in config["reconfigurable_partitions"]:
         print(f"  {part['partition_name']}:")
         for rm in part["modules"]:
             params = rm.get("parameters", {})
             extra = f"  params={params}" if params else ""
-            print(f"    {rm['cell_name']}  top={rm['top']}{extra}")
+            print(f"    {rm['cell_name']}  module={rm.get('top', rm.get('vlnv'))}{extra}")
+    for module in config["static_modules"]:
+        print(f"  Static {module['cell_name']}: {module['vlnv']}")
     print("Valid.")

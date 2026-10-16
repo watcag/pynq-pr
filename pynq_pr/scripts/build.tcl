@@ -40,12 +40,17 @@ if { $verilog_defines ne "" } {
     set_property verilog_define $verilog_defines [current_fileset]
 }
 
+if {![info exists ip_repositories]} {set ip_repositories {}}
 if { $reconfiguration_method eq "icap" } {
     set versatile_rtl_dir [file join $script_dir .. versatile rtl]
     set versatile_ip_dir  [file join $script_dir .. versatile ip axi3_ctrl_1.0_0_0]
     add_files -fileset sources_1 [glob [file normalize $versatile_rtl_dir]/*.vhd]
     add_files -fileset sources_1 [glob [file normalize $versatile_rtl_dir]/*.v]
-    set_property ip_repo_paths [list [file normalize $versatile_ip_dir]] [current_project]
+    lappend ip_repositories [file normalize $versatile_ip_dir]
+}
+
+if {[llength $ip_repositories]} {
+    set_property ip_repo_paths $ip_repositories [current_project]
     update_ip_catalog
 }
 
@@ -76,6 +81,11 @@ add_files -fileset constrs_1 $pblocks_xdc
 #     add_files -fileset constrs_1 [glob [file normalize $constraints_dir]/versatile.xdc]
 # }
 
+if {[info exists validate_only] && $validate_only} {
+    generate_target all [get_files *.bd]
+    puts "BD_SOURCE_VALIDATION_COMPLETE: no synthesis, routing or qualified image"
+    exit
+}
 source [file join $script_dir run_impl.tcl]
 
 exit

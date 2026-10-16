@@ -1,4 +1,5 @@
 import yaml
+import re
 from pathlib import Path
 
 VALID_RECONFIG_METHODS = ("pcap", "icap")
@@ -27,9 +28,29 @@ def validate(config, root_dir):
     partitions = config["reconfigurable_partitions"]
     if not 1 <= len(partitions) <= 4:
         raise ValueError(f"Number of partitions must be between 1 and 4, got {len(partitions)}")
+    interface = config.get("interface", "stream")
+    if interface not in ("stream", "memory"):
+        raise ValueError("interface must be stream or memory")
+    if interface == "memory":
+        if config["board"] != "kv260" or method != "pcap":
+            raise ValueError("memory interface currently supports KV260 PCAP")
+        if config.get("axis_switch") or config.get("streams", 1) != 1:
+            raise ValueError("memory interface does not use stream routing or extra DMA streams")
+        if config.get("memory_data_width", 128) not in (32, 64, 128, 256, 512):
+            raise ValueError("memory_data_width must be 32, 64, 128, 256 or 512")
+        if not 4 <= config.get("control_aperture_bits", 8) <= 16:
+            raise ValueError("control_aperture_bits must be between 4 and 16")
+    static = config.get("static_modules", [])
+    if not isinstance(static, list):
+        raise ValueError("static_modules must be a list")
+    if static and interface != "memory":
+        raise ValueError("static_modules require interface: memory")
 
-    if "sources" not in config or not config["sources"]:
-        raise ValueError("Missing required key: sources")
+    if not config.get("sources") and not config.get("ip_repositories"):
+        raise ValueError("Provide sources or ip_repositories")
+    for repo in config.get("ip_repositories", []):
+        if not (root_dir / repo).is_dir():
+            raise FileNotFoundError(f"IP repository not found: {root_dir / repo}")
 
     seen_partitions = set()
     for part in partitions:
@@ -45,14 +66,52 @@ def validate(config, root_dir):
 
         seen_cells = set()
         for rm in part["modules"]:
-            for key in ["cell_name", "top"]:
+            for key in ["cell_name"]:
                 if key not in rm:
                     raise ValueError(f"Module in partition '{pname}' missing required key: {key}")
+            if ("top" in rm) == ("vlnv" in rm):
+                raise ValueError("Each module needs exactly one of top or vlnv")
+            if "vlnv" in rm and interface != "memory":
+                raise ValueError("IP modules currently require interface: memory")
             if rm["cell_name"] in seen_cells:
                 raise ValueError(f"Duplicate cell_name in partition '{pname}': {rm['cell_name']}")
             seen_cells.add(rm["cell_name"])
 
-    for src in config["sources"]:
+    reserved = seen_partitions | {"ps", "rst_system", "rps_axi_periph", "rps_interconnect",
+        "gpio_decouple", "gpio_rp_reset", "gpio_shutdown", "shutdown_status"}
+    reserved.update(f"{tag}_{name}" for name in seen_partitions for tag in ("decouple", "reset", "shutdown"))
+    for module in static:
+        if not isinstance(module, dict) or not module.get("vlnv") or "top" in module:
+            raise ValueError("Static modules need vlnv and cell_name, not top")
+        if not isinstance(module.get("parameters", {}), dict):
+            raise ValueError("Static module parameters must be a mapping")
+        name = module.get("cell_name", "")
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            raise ValueError("Static module cell_name must be a simple identifier")
+        if name in reserved:
+            raise ValueError(f"Duplicate or reserved static module cell_name: {name}")
+        reserved.add(name)
+    if len(static) + len(partitions) + 3 > 16:
+        raise ValueError("Memory interface supports at most 16 control ports including the three GPIOs")
+
+    width = config.get("stream_width", 32)
+    if width not in (32, 64, 128, 256, 512, 1024):
+        raise ValueError(f"stream_width must be 32, 64, 128, 256, 512 or 1024, got {width}")
+    burst = config.get("dma_burst", 16)
+    if burst not in (2, 4, 8, 16, 32, 64, 128, 256):
+        raise ValueError(f"dma_burst must be a power of two from 2 to 256, got {burst}")
+
+    streams = config.get("streams", 1)
+    if streams not in (1, 2):
+        raise ValueError(f"streams must be 1 or 2 (stream k uses HP<k>), got {streams}")
+    if streams > 1 and (config.get("reconfiguration_method", "pcap") != "pcap" or config.get("axis_switch")):
+        raise ValueError("streams: 2 needs pcap (ICAP fetches over HP1) and no axis_switch")
+
+    regions = config.get("reconfigurable_regions")
+    if regions is not None and (not isinstance(regions, list) or not all(isinstance(r, str) for r in regions)):
+        raise ValueError("reconfigurable_regions must be a list of clock region names, e.g. [X0Y1, X1Y1]")
+
+    for src in config.get("sources", []):
         if not (root_dir / src).exists():
             raise FileNotFoundError(f"Source not found: {root_dir / src}")
 
@@ -62,9 +121,17 @@ def apply_defaults(config, root_dir):
     config["reconfiguration_method"] = method
     config.setdefault("axis_switch", False)
     config.setdefault("_versatile_freq", 100)  # ICAP runs at 2x this frequency
-    config.setdefault("_data_freq", 100)
+    config.setdefault("data_freq", 100)        # MHz, PL clock of the RPs, DMAs and interconnects
+    config.setdefault("stream_width", 32)      # RP AXI4-Stream TDATA bits
+    config.setdefault("dma_burst", 16)         # AXI DMA max burst length (beats)
+    config.setdefault("streams", 1)            # stream pairs per partition, each with its own DMA
+    config.setdefault("interface", "stream")
+    config.setdefault("memory_data_width", 128)
+    config.setdefault("control_aperture_bits", 8)
+    config.setdefault("static_modules", [])
 
-    dummy_path = str(PKG_DIR / "rtl" / "dummy.v")
+    dummy = "dummy_memory.v" if config["interface"] == "memory" else ("dummy.v" if config["streams"] == 1 else "dummy2.v")
+    dummy_path = str(PKG_DIR / "rtl" / dummy)
     if "sources" not in config:
         config["sources"] = []
     if dummy_path not in config["sources"]:

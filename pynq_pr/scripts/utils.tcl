@@ -13,6 +13,107 @@ namespace eval utils {
         }
     }
 
+    # Shared metadata admission for fixed and reconfigurable memory-master IPs.
+    proc create_memory_ip {module} {
+        set name [dict get $module cell_name]
+        set cell [create_bd_cell -type ip -vlnv [dict get $module vlnv] $name]
+        apply_rm_params $cell [dict get $module parameters]
+        set masters [get_bd_intf_pins -of_objects $cell -filter {MODE == Master && VLNV =~ *:aximm_rtl:*}]
+        set slaves [get_bd_intf_pins -of_objects $cell -filter {MODE == Slave && VLNV =~ *:aximm_rtl:*}]
+        set clocks [get_bd_pins -of_objects $cell -filter {TYPE == clk && DIR == I}]
+        set resets [get_bd_pins -of_objects $cell -filter {TYPE == rst && DIR == I}]
+        if {[llength $masters] != 1 || [llength $slaves] != 1 || [llength $clocks] != 1 || [llength $resets] != 1} {
+            error "Memory IP needs exactly one AXI master, AXI-Lite slave, clock and reset: $name"
+        }
+        set master [lindex $masters 0]
+        set slave [lindex $slaves 0]
+        if {[get_property CONFIG.PROTOCOL $master] ne "AXI4" ||
+            [get_property CONFIG.ADDR_WIDTH $master] != 64 ||
+            [get_property CONFIG.PROTOCOL $slave] ne "AXI4LITE" ||
+            [get_property CONFIG.DATA_WIDTH $slave] != 32 ||
+            [get_property CONFIG.ADDR_WIDTH $slave] > 32} {
+            error "Memory IP AXI protocol/address or control aperture does not match RP: $name"
+        }
+        if {[get_property CONFIG.POLARITY [lindex $resets 0]] ne "ACTIVE_LOW"} {
+            error "Memory IP reset must be active low: $name"
+        }
+        set native_width [get_property CONFIG.ADDR_WIDTH $slave]
+        set segments [get_bd_addr_segs -of_objects $slave]
+        if {[llength $segments] != 1} {error "Memory IP needs one control register segment: $name"}
+        set native_range [expr {min(1 << $native_width, [get_property RANGE [lindex $segments 0]])}]
+        if {$native_range <= 0 || ($native_range & ($native_range-1))} {
+            error "Native control register aperture must be a positive power of two: $name"
+        }
+        return [dict create cell $cell master $master slave $slave clock [lindex $clocks 0] \
+            reset [lindex $resets 0] segment [lindex $segments 0] range $native_range]
+    }
+
+    # An exported IP can use its own interface names. Match by metadata and
+    # normalize its memory master with the vendor converter, never bit slicing.
+    proc create_rm {rm {control_base 0}} {
+        set top [dict get $rm top]
+        if {![dict exists $rm vlnv] || [dict get $rm vlnv] eq ""} {
+            set cell [create_bd_cell -type module -reference $top $top]
+            apply_rm_params $cell [dict get $rm parameters]
+            connect_rm_ports $top
+            return
+        }
+        set control_ports [get_bd_intf_ports -filter {MODE == Slave && VLNV =~ *:aximm_rtl:*}]
+        set memory_ports [get_bd_intf_ports -filter {MODE == Master && VLNV =~ *:aximm_rtl:*}]
+        if {[llength $control_ports] != 1 || [llength $memory_ports] != 1} {
+            error "Memory RP needs one control slave and memory master boundary"
+        }
+        set control_port [lindex $control_ports 0]
+        set memory_port [lindex $memory_ports 0]
+        set control_space [get_bd_addr_spaces [get_property NAME $control_port]]
+        set_property -dict [list CONFIG.PROTOCOL AXI4LITE CONFIG.ADDR_WIDTH 32 \
+            CONFIG.DATA_WIDTH 32] $control_port
+        set_property -dict [list CONFIG.PROTOCOL AXI4 CONFIG.ADDR_WIDTH 64 \
+            CONFIG.DATA_WIDTH $::memory_data_width] $memory_port
+        set_property range 0x100000000 $control_space
+        set ip [create_memory_ip $rm]
+        set name [dict get $rm cell_name]
+        set master [dict get $ip master]
+        set slave [dict get $ip slave]
+        set native_range [dict get $ip range]
+        if {$native_range > (1 << $::control_aperture_bits)} {
+            error "Native control register aperture does not fit memory RP: $name"
+        }
+        set aperture 0
+        while {(1 << $aperture) < $native_range} {incr aperture}
+        # Decode only the native register aperture. Upper addresses must
+        # return DECERR rather than aliasing after address-width adaptation.
+        set adapter [create_bd_cell -type ip -vlnv xilinx.com:ip:axi_crossbar control_adapter]
+        # The vendor fabric has at least two slots; explicitly disable the
+        # spare range (base > high), instead of aliasing register zero.
+        set_property -dict [list CONFIG.PROTOCOL AXI4LITE CONFIG.NUM_SI 1 CONFIG.NUM_MI 2 \
+            CONFIG.ADDR_WIDTH 32 CONFIG.M00_A00_ADDR_WIDTH $aperture \
+            CONFIG.M00_A00_BASE_ADDR $control_base \
+            CONFIG.M01_A00_ADDR_WIDTH 0 CONFIG.M01_A00_BASE_ADDR 0xFFFFFFFFFFFFFFFF] $adapter
+        connect_bd_intf_net $control_port -boundary_type upper [get_bd_intf_pins $adapter/S00_AXI]
+        connect_bd_intf_net [get_bd_intf_pins $adapter/M00_AXI] $slave
+        connect_bd_net [get_bd_ports clk] [get_bd_pins $adapter/aclk]
+        connect_bd_net [get_bd_ports rst_n] [get_bd_pins $adapter/aresetn]
+        create_bd_addr_seg -range [expr {1 << $aperture}] -offset $control_base \
+            $control_space [dict get $ip segment] control_registers
+        connect_bd_net [get_bd_ports clk] [dict get $ip clock]
+        connect_bd_net [get_bd_ports rst_n] [dict get $ip reset]
+        set data_width [get_property CONFIG.DATA_WIDTH $master]
+        set id_width [get_property CONFIG.ID_WIDTH $master]
+        if {$data_width != $::memory_data_width || $id_width != 0} {
+            set converter [create_bd_cell -type ip -vlnv xilinx.com:ip:axi_dwidth_converter memory_adapter]
+            set_property -dict [list CONFIG.PROTOCOL AXI4 CONFIG.ADDR_WIDTH 64 \
+                CONFIG.SI_DATA_WIDTH $data_width CONFIG.MI_DATA_WIDTH $::memory_data_width \
+                CONFIG.SI_ID_WIDTH [expr {max(1, $id_width)}]] $converter
+            connect_bd_intf_net $master [get_bd_intf_pins $converter/S_AXI]
+            connect_bd_intf_net $memory_port -boundary_type upper [get_bd_intf_pins $converter/M_AXI]
+            connect_bd_net [get_bd_ports clk] [get_bd_pins $converter/s_axi_aclk]
+            connect_bd_net [get_bd_ports rst_n] [get_bd_pins $converter/s_axi_aresetn]
+        } else {
+            connect_bd_intf_net $memory_port -boundary_type upper $master
+        }
+    }
+
     # Connect an RM module's ports to the BDC boundary.
     # Connects interface ports (AXI-Stream, AXI-Lite, etc.) first,
     # then connects remaining scalar ports (clk, rst_n) while

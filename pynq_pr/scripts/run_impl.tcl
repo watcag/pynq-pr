@@ -68,12 +68,32 @@ foreach vc $variant_configs {
 
 launch_runs synth_1 -jobs $jobs
 wait_on_runs synth_1
-launch_runs impl_base -to_step write_bitstream -jobs $jobs
-wait_on_run impl_base
-
+source [file join $script_dir qualify_impl.tcl]
+set implementation_runs [list impl_base]
 foreach vc $variant_configs {
-    launch_runs impl_${vc} -to_step write_bitstream -jobs $jobs
-    wait_on_run impl_${vc}
+    lappend implementation_runs impl_${vc}
+}
+set qualification_dir [file join $proj_dir qualification]
+file mkdir $qualification_dir
+set checkpoints {}
+foreach run $implementation_runs {
+    # Include the configured post-route optimization before checking timing.
+    set step route_design
+    if {[get_property STEPS.POST_ROUTE_PHYS_OPT_DESIGN.IS_ENABLED [get_runs $run]]} {
+        set step post_route_phys_opt_design
+    }
+    launch_runs $run -to_step $step -jobs $jobs
+    wait_on_run $run
+    lappend checkpoints [qualification::routed_checkpoint $run $qualification_dir]
+}
+if {[llength $checkpoints] > 1} {
+    pr_verify -full_check -initial [lindex $checkpoints 0] -additional [lrange $checkpoints 1 end] \
+        -file [file join $qualification_dir pr_verify.log]
+}
+# Only qualified configurations may generate or publish bitstreams.
+foreach run $implementation_runs {
+    launch_runs $run -to_step write_bitstream -jobs $jobs
+    wait_on_run $run
 }
 
 # Copy bitstreams and hardware handoff files

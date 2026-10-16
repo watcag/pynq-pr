@@ -17,6 +17,8 @@ Example
 """
 
 import os
+import time
+import math
 
 from pynq import Clocks, DefaultHierarchy, DefaultIP, Overlay as _PynqOverlay, PL
 from pynq.lib import AxiGPIO
@@ -84,9 +86,11 @@ class PrPartition(DefaultHierarchy):
             for d in ips.values()
         )
         has_rp = "rp" in description.get("hierarchies", {})
-        return has_dma and has_rp
+        has_shutdown = any(d.get("type", "").startswith("xilinx.com:ip:dfx_axi_shutdown_manager")
+                           for d in ips.values())
+        return has_rp and (has_dma or has_shutdown)
 
-    def download(self, partial_bit, method="pcap", icap=False):
+    def download(self, partial_bit, method="pcap", icap=False, *, drained=None, timeout=1.0):
         """Download a partial bitstream with automatic decoupling.
 
         Parameters
@@ -98,6 +102,13 @@ class PrPartition(DefaultHierarchy):
             Reconfiguration method: "pcap", "fpga_manager", or "icap".
         icap : bool
             Legacy shorthand. If True, equivalent to method="icap".
+        drained : callable, optional
+            Required for memory RPs: return True only after every master and
+            response monitor has drained. Keep DDR buffer owners alive across
+            the swap and rebind kernel control handles after successful load.
+        timeout : float
+            Seconds to await static AXI shutdown acknowledgement/release. A
+            failed memory swap retains isolation (and reset once acknowledged).
         """
         if icap:
             method = "icap"
@@ -114,6 +125,57 @@ class PrPartition(DefaultHierarchy):
 
         bit_index = ol._partitions[name]
         mask = 1 << bit_index
+        memory = any(d.get("type", "").startswith("xilinx.com:ip:dfx_axi_shutdown_manager")
+                     for d in self.description.get("ip", {}).values())
+        if memory:
+            if not math.isfinite(timeout) or timeout < 0:
+                raise ValueError("timeout must be finite and nonnegative")
+            if method != "pcap":
+                raise ValueError("Memory partitions currently use PCAP")
+            if not callable(drained) or not drained():
+                raise RuntimeError("Drain every resident master and response monitor before reconfiguration")
+            try:
+                ol._decoupler.write(mask, mask)
+                ol._shutdown_request.write(mask, mask)
+                deadline = time.monotonic() + timeout
+                while not ol._shutdown_status.read() & mask:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError("AXI shutdown not acknowledged; keep owners and isolation")
+                    time.sleep(.001)
+                # Reset only after outstanding AXI responses have drained.
+                ol._rp_reset.write(0, mask)
+                self.rp.download(partial_bit)
+                # Keep reset/control isolation until the static memory path reopens.
+                ol._shutdown_request.write(0, mask)
+                deadline = time.monotonic() + timeout
+                while ol._shutdown_status.read() & mask:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError("AXI shutdown did not release")
+                    time.sleep(.001)
+                ol._rp_reset.write(mask, mask)
+                ol._decoupler.write(0, mask)
+            except Exception as error:
+                # A GPIO write may fail after taking effect. Stop control and
+                # reacquire shutdown before resetting an uncertain new master.
+                recovery_errors = []
+                for channel in (ol._decoupler, ol._shutdown_request):
+                    try:
+                        channel.write(mask, mask)
+                    except Exception as recovery_error:
+                        recovery_errors.append(recovery_error)
+                try:
+                    deadline = time.monotonic() + timeout
+                    while not ol._shutdown_status.read() & mask:
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError("AXI shutdown recovery not acknowledged")
+                        time.sleep(.001)
+                    ol._rp_reset.write(0, mask)
+                except Exception as recovery_error:
+                    recovery_errors.append(recovery_error)
+                if recovery_errors:
+                    raise RuntimeError("Memory PR failed; isolation/reset recovery uncertain; retain buffer owners") from error
+                raise
+            return
         ol._decoupler.write(mask, mask)
         try:
             if method == "icap":
@@ -139,6 +201,10 @@ class Overlay(_PynqOverlay):
         super().__init__(bitfile_name, download=download, **kwargs)
 
         self._decoupler = AxiGPIO(self.ip_dict["gpio_decouple"]).channel1
+        if "gpio_shutdown" in self.ip_dict:
+            shutdown = AxiGPIO(self.ip_dict["gpio_shutdown"])
+            self._shutdown_request, self._shutdown_status = shutdown.channel1, shutdown.channel2
+            self._rp_reset = AxiGPIO(self.ip_dict["gpio_rp_reset"]).channel1
         self._partitions = {}
         self._icap_cache = {}
         self._fpga_mgr_cache = {}
@@ -196,7 +262,7 @@ class Overlay(_PynqOverlay):
         if self._switch is not None:
             self._switch.default()
 
-    def pr_download(self, partition_name, partial_bit, method="pcap", icap=False):
+    def pr_download(self, partition_name, partial_bit, method="pcap", icap=False, *, drained=None, timeout=1.0):
         """Download a partial bitstream by partition name.
 
         Parameters
@@ -217,7 +283,7 @@ class Overlay(_PynqOverlay):
                 f"Unknown partition '{partition_name}'. "
                 f"Available: {list(self._partitions.keys())}"
             )
-        getattr(self, partition_name).download(partial_bit, method=method)
+        getattr(self, partition_name).download(partial_bit, method=method, drained=drained, timeout=timeout)
 
     def chain(self, partition_names):
         """Route partitions in a pipeline and return (send_dma, recv_dma).
