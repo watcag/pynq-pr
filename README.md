@@ -67,6 +67,17 @@ pynq-pr build -c pr.yaml -j 8        # Vivado jobs/threads (default 16)
 
 Output lands in `output/<project>/bits/`: one static bitstream (`<project>.bit`), one partial bitstream per module (`<partition>_<cell_name>.bit`), plus matching `.hwh` files.
 
+Every configuration is routed, including enabled post-route optimization, before
+bitstream generation. The flow requires nonempty, passing setup, hold and
+pulse-width timing summaries, then runs `pr_verify -full_check` on the full
+routed configuration checkpoints. Timing reports, checkpoints and the comparison
+log stay under `output/<project>/qualification/`. A timing or compatibility
+failure stops bitstream generation and publication. This follows AMD's
+[configuration verification order](https://docs.amd.com/r/2023.1-English/ug909-vivado-partial-reconfiguration/Verifying-Configurations);
+it does not replace functional simulation or a board retention test. Run
+`python3 -m pytest -q tests/test_implementation.py` for timing rejection and
+publication-order fault tests using Tcl command doubles.
+
 ### Optional YAML fields
 
 | Field | Default | Description |
