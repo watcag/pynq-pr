@@ -27,9 +27,24 @@ def validate(config, root_dir):
     partitions = config["reconfigurable_partitions"]
     if not 1 <= len(partitions) <= 4:
         raise ValueError(f"Number of partitions must be between 1 and 4, got {len(partitions)}")
+    interface = config.get("interface", "stream")
+    if interface not in ("stream", "memory"):
+        raise ValueError("interface must be stream or memory")
+    if interface == "memory":
+        if config["board"] != "kv260" or method != "pcap":
+            raise ValueError("memory interface currently supports KV260 PCAP")
+        if config.get("axis_switch") or config.get("streams", 1) != 1:
+            raise ValueError("memory interface does not use stream routing or extra DMA streams")
+        if config.get("memory_data_width", 128) not in (32, 64, 128, 256, 512):
+            raise ValueError("memory_data_width must be 32, 64, 128, 256 or 512")
+        if not 4 <= config.get("control_aperture_bits", 8) <= 16:
+            raise ValueError("control_aperture_bits must be between 4 and 16")
 
-    if "sources" not in config or not config["sources"]:
-        raise ValueError("Missing required key: sources")
+    if not config.get("sources") and not config.get("ip_repositories"):
+        raise ValueError("Provide sources or ip_repositories")
+    for repo in config.get("ip_repositories", []):
+        if not (root_dir / repo).is_dir():
+            raise FileNotFoundError(f"IP repository not found: {root_dir / repo}")
 
     seen_partitions = set()
     for part in partitions:
@@ -45,9 +60,13 @@ def validate(config, root_dir):
 
         seen_cells = set()
         for rm in part["modules"]:
-            for key in ["cell_name", "top"]:
+            for key in ["cell_name"]:
                 if key not in rm:
                     raise ValueError(f"Module in partition '{pname}' missing required key: {key}")
+            if ("top" in rm) == ("vlnv" in rm):
+                raise ValueError("Each module needs exactly one of top or vlnv")
+            if "vlnv" in rm and interface != "memory":
+                raise ValueError("IP modules currently require interface: memory")
             if rm["cell_name"] in seen_cells:
                 raise ValueError(f"Duplicate cell_name in partition '{pname}': {rm['cell_name']}")
             seen_cells.add(rm["cell_name"])
@@ -69,7 +88,7 @@ def validate(config, root_dir):
     if regions is not None and (not isinstance(regions, list) or not all(isinstance(r, str) for r in regions)):
         raise ValueError("reconfigurable_regions must be a list of clock region names, e.g. [X0Y1, X1Y1]")
 
-    for src in config["sources"]:
+    for src in config.get("sources", []):
         if not (root_dir / src).exists():
             raise FileNotFoundError(f"Source not found: {root_dir / src}")
 
@@ -83,8 +102,12 @@ def apply_defaults(config, root_dir):
     config.setdefault("stream_width", 32)      # RP AXI4-Stream TDATA bits
     config.setdefault("dma_burst", 16)         # AXI DMA max burst length (beats)
     config.setdefault("streams", 1)            # stream pairs per partition, each with its own DMA
+    config.setdefault("interface", "stream")
+    config.setdefault("memory_data_width", 128)
+    config.setdefault("control_aperture_bits", 8)
 
-    dummy_path = str(PKG_DIR / "rtl" / ("dummy.v" if config["streams"] == 1 else "dummy2.v"))
+    dummy = "dummy_memory.v" if config["interface"] == "memory" else ("dummy.v" if config["streams"] == 1 else "dummy2.v")
+    dummy_path = str(PKG_DIR / "rtl" / dummy)
     if "sources" not in config:
         config["sources"] = []
     if dummy_path not in config["sources"]:

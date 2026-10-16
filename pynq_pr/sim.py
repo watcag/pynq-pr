@@ -213,6 +213,8 @@ def generate_sim_config(config_path, force=False):
     """
     root_dir = Path.cwd()
     config = load_config(config_path)
+    if config['interface'] == 'memory':
+        raise NotImplementedError('pynq-pr sim uses stream boundaries; memory RPs require an AXI-master testbench')
     project = config['project']
     if config['stream_width'] != 32:
         raise NotImplementedError("pynq-pr sim supports stream_width 32 only")

@@ -90,6 +90,103 @@ Your RTL modules must match these port names to connect to the shipped block des
 - AXI-Lite slave: `s_axi_AXILiteS_*`
 - Clock: `clk`, Reset: `rst_n`
 
+### Resident memory partitions (experimental)
+
+`interface: memory` selects an AXI4 memory-master boundary instead of DMA streams.
+This currently supports KV260 with PCAP. The PS DDR controller, memory
+interconnect, AXI shutdown manager, and control isolation remain static. Each RP
+contains one master (64-bit addresses, no AXI IDs at the boundary), one AXI-Lite
+control interface with 32-bit addresses and data, clock, and active-low reset.
+
+```yaml
+project: resident_example
+board: kv260
+interface: memory
+memory_data_width: 128
+control_aperture_bits: 8
+ip_repositories: [ip]
+reconfigurable_partitions:
+  - partition_name: compute
+    modules:
+      - cell_name: first
+        vlnv: example.org:kernel:first:1.0
+      - cell_name: second
+        vlnv: example.org:kernel:second:1.0
+```
+
+Use `vlnv` for exported IP, or the existing `top`/`sources` form for RTL matching
+`pynq_pr/rtl/dummy_memory.v`. Exported IP is matched by interface metadata. Its
+register aperture must fit `2**control_aperture_bits` bytes. An AXI-Lite crossbar
+decodes the actual native register aperture; upper addresses
+return DECERR instead of aliasing native registers. The vendor AXI data-width converter
+handles master data-width and ID adaptation inside the RP. Extra master/control
+interfaces and incompatible protocols are rejected.
+
+```python
+# Buffer owners remain alive; this callback checks kernel AND response monitors.
+ol.compute.download("second.bit", drained=sequence.idle, timeout=1.0)
+# Rebind control/kernel handles and restore their argument registers afterwards.
+# Reuse the same DDR buffers; do not recreate/upload the circuit arrays.
+```
+
+Before a full build, run the same BD path without synthesis or routing:
+
+```sh
+pynq-pr validate -c memory.yaml
+pynq-pr build -c memory.yaml --validate-only -j 2
+```
+
+This writes the project and generated source products under `output/<project>`;
+it does not produce or qualify an image. Control windows are allocated from the
+actual PS address map, after the GPIO windows. The fixed 32-bit AXI-Lite wire
+preserves that absolute base; `control_aperture_bits` bounds native register
+capacity independently of wire width. Every alternative uses the same static
+window and DDR apertures.
+
+The caller must stop issuing work before calling `download`. Caller drain and
+static AXI shutdown acknowledgement are separate checks. The driver isolates
+control, requests shutdown, waits for acknowledgement, asserts RP reset, loads the
+partial, and releases shutdown/reset/isolation after success. Failure attempts to
+retain isolation and reports uncertain recovery; an unacknowledged master is never reset. Retain its buffers until
+recovery confirms that accesses have stopped. No DDR continuity on a full-overlay
+reload is promised. This path needs routed simulation and silicon qualification
+before production use.
+
+Run the board-independent admission and failure-ordering tests with
+`python3 -m pytest -q tests/test_memory.py`.
+
+For a generated 32-bit-address control adapter for a 7-bit native aperture, `tests/tb_control_decode.sv`
+checks mapped read/write requests and DECERR at `0x80`, `0xfc`, and `0xff`,
+plus offsets `0x100` and `0x10000`, including that no unmapped address reaches
+the peripheral. In the PS fixture, the generated base was `0xB0030000`; the test
+used addresses relative to that actual base. Run it against the
+**generated** adapter wrapper and the matching Vivado vendor RTL, rather than
+substituting decoder logic. In a scratch directory, with `XILINX_VIVADO` set by
+Vivado's `settings64.sh`:
+
+```sh
+# Set these to the generated wrapper file and its module name.
+control_rtl=/path/to/generated/control_adapter.v
+control_module=project_control_adapter_0
+# Use the actual mapped control OFFSET from the generated BD/Address Editor.
+control_base="32'hB0030000"
+pynq_pr_dir=/path/to/pynq-pr
+vendor_ip="$XILINX_VIVADO/data/ip/xilinx"
+xvlog --sv -d DUT_MODULE="$control_module" -d CONTROL_BASE="$control_base" -i "$vendor_ip/axi_infrastructure_v1_1/hdl" \
+  "$vendor_ip/generic_baseblocks_v2_1/hdl/generic_baseblocks_v2_1_vl_rfs.v" \
+  "$vendor_ip/axi_register_slice_v2_1/hdl/axi_register_slice_v2_1_vl_rfs.v" \
+  "$vendor_ip/axi_crossbar_v2_1/hdl/axi_crossbar_v2_1_vl_rfs.v" \
+  "$control_rtl" "$pynq_pr_dir/tests/tb_control_decode.sv"
+xelab tb -s decode --mt 2
+xsim decode -runall > decode.log
+python3 -c "from pathlib import Path; s=Path('decode.log').read_text(); assert 'AXILITE_DECODE_PASS mapped=4 unmapped=10 no_alias=1' in s and 'Fatal:' not in s"
+```
+
+This is a source simulation check. The existing `pynq-pr sim` command handles
+stream boundaries and explicitly rejects memory configurations. Routed
+simulation and a memory-preserving swap on hardware remain separate acceptance
+steps.
+
 ## Supported Boards
 
 | Board | Part | FPGA |

@@ -136,6 +136,11 @@ proc add_versatile {clk_net versatile_clk_src versatile_freq resetn_net resetn_e
 if { ![info exists stream_width] } { set stream_width 32 }
 if { ![info exists dma_burst] }    { set dma_burst 16 }
 if { ![info exists streams] }      { set streams 1 }
+if { ![info exists rp_interface] } { set rp_interface stream }
+if {$rp_interface eq "memory"} {
+    source [file join $script_dir create_memory_bd.tcl]
+    return
+}
 
 set design_name $project_name
 create_bd_design $design_name
