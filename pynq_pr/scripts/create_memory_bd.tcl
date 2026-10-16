@@ -5,6 +5,8 @@ create_bd_design $design_name
 source [file join $script_dir ps_${board_name}.tcl]
 set_property -dict [list CONFIG.PSU__USE__M_AXI_GP0 0 CONFIG.PSU__USE__S_AXI_GP3 0] $ps
 set count [llength $partition_names]
+if {![info exists static_modules]} {set static_modules {}}
+set static_count [llength $static_modules]
 set gpio_width [expr {max(2, $count)}]
 foreach name {gpio_decouple gpio_rp_reset gpio_shutdown} {
     create_bd_cell -type ip -vlnv xilinx.com:ip:axi_gpio $name
@@ -23,9 +25,9 @@ foreach name {rps_axi_periph rps_interconnect} {
     connect_bd_net $clk_net [get_bd_pins $name/ACLK]
     connect_bd_net $resetn_net [get_bd_pins $name/ARESETN]
 }
-set control_count [expr {$count+3}]
+set control_count [expr {$count+3+$static_count}]
 set_property CONFIG.NUM_MI $control_count [get_bd_cells rps_axi_periph]
-set_property -dict [list CONFIG.NUM_SI $count CONFIG.NUM_MI 1] [get_bd_cells rps_interconnect]
+set_property -dict [list CONFIG.NUM_SI [expr {$count+$static_count}] CONFIG.NUM_MI 1] [get_bd_cells rps_interconnect]
 connect_bd_intf_net $gp1_intf [get_bd_intf_pins rps_axi_periph/S00_AXI]
 connect_bd_intf_net [get_bd_intf_pins rps_interconnect/M00_AXI] $hp0_intf
 foreach pin {S00} {
@@ -95,6 +97,22 @@ foreach name $partition_names {
     connect_bd_net [get_bd_pins $name/in_shutdown] [get_bd_pins shutdown_status/In$i]
     incr i
 }
+# Fixed memory masters use the system clock/reset and remain live across PR.
+# The static interconnect handles their native widths; they do not need an
+# RP boundary converter, shutdown manager, decoupler or per-RP reset.
+set fixed_ips {}
+set i $count
+foreach module $static_modules {
+    set ip [utils::create_memory_ip $module]
+    set si [format S%02d $i]
+    set mi [format M%02d [expr {$i+3}]]
+    connect_bd_intf_net [dict get $ip master] [get_bd_intf_pins rps_interconnect/${si}_AXI]
+    connect_bd_intf_net [get_bd_intf_pins rps_axi_periph/${mi}_AXI] [dict get $ip slave]
+    connect_bd_net $clk_net [dict get $ip clock] [get_bd_pins rps_interconnect/${si}_ACLK]
+    connect_bd_net $resetn_net [dict get $ip reset] [get_bd_pins rps_interconnect/${si}_ARESETN]
+    lappend fixed_ips $ip
+    incr i
+}
 # A full-width AXI-Lite wire is not a 4-GiB register file. Allocate small
 # RP windows after the control GPIOs, using their actual PS mappings.
 set next_control 0
@@ -111,6 +129,15 @@ foreach name $partition_names {
     create_bd_addr_seg -range $control_range -offset $next_control $control_space \
         [get_bd_addr_segs $name/dummy/s_axi_AXILiteS/reg0] ${name}_control
     incr next_control $control_range
+}
+foreach ip $fixed_ips {
+    set size [dict get $ip range]
+    set next_control [expr {($next_control+$size-1) & -$size}]
+    set name [get_property NAME [dict get $ip cell]]
+    create_bd_addr_seg -range $size -offset $next_control $control_space \
+        [dict get $ip segment] ${name}_control
+    puts "STATIC_MEMORY_IP $name control_base=$next_control control_range=$size system_clock=$clk_net system_reset=$resetn_net"
+    incr next_control $size
 }
 assign_bd_address
 validate_bd_design

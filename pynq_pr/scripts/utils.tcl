@@ -13,32 +13,11 @@ namespace eval utils {
         }
     }
 
-    # An exported IP can use its own interface names. Match by metadata and
-    # normalize its memory master with the vendor converter, never bit slicing.
-    proc create_rm {rm {control_base 0}} {
-        set top [dict get $rm top]
-        if {![dict exists $rm vlnv] || [dict get $rm vlnv] eq ""} {
-            set cell [create_bd_cell -type module -reference $top $top]
-            apply_rm_params $cell [dict get $rm parameters]
-            connect_rm_ports $top
-            return
-        }
-        set control_ports [get_bd_intf_ports -filter {MODE == Slave && VLNV =~ *:aximm_rtl:*}]
-        set memory_ports [get_bd_intf_ports -filter {MODE == Master && VLNV =~ *:aximm_rtl:*}]
-        if {[llength $control_ports] != 1 || [llength $memory_ports] != 1} {
-            error "Memory RP needs one control slave and memory master boundary"
-        }
-        set control_port [lindex $control_ports 0]
-        set memory_port [lindex $memory_ports 0]
-        set control_space [get_bd_addr_spaces [get_property NAME $control_port]]
-        set_property -dict [list CONFIG.PROTOCOL AXI4LITE CONFIG.ADDR_WIDTH 32 \
-            CONFIG.DATA_WIDTH 32] $control_port
-        set_property -dict [list CONFIG.PROTOCOL AXI4 CONFIG.ADDR_WIDTH 64 \
-            CONFIG.DATA_WIDTH $::memory_data_width] $memory_port
-        set_property range 0x100000000 $control_space
-        set name [dict get $rm cell_name]
-        set cell [create_bd_cell -type ip -vlnv [dict get $rm vlnv] $name]
-        apply_rm_params $cell [dict get $rm parameters]
+    # Shared metadata admission for fixed and reconfigurable memory-master IPs.
+    proc create_memory_ip {module} {
+        set name [dict get $module cell_name]
+        set cell [create_bd_cell -type ip -vlnv [dict get $module vlnv] $name]
+        apply_rm_params $cell [dict get $module parameters]
         set masters [get_bd_intf_pins -of_objects $cell -filter {MODE == Master && VLNV =~ *:aximm_rtl:*}]
         set slaves [get_bd_intf_pins -of_objects $cell -filter {MODE == Slave && VLNV =~ *:aximm_rtl:*}]
         set clocks [get_bd_pins -of_objects $cell -filter {TYPE == clk && DIR == I}]
@@ -62,7 +41,42 @@ namespace eval utils {
         set segments [get_bd_addr_segs -of_objects $slave]
         if {[llength $segments] != 1} {error "Memory IP needs one control register segment: $name"}
         set native_range [expr {min(1 << $native_width, [get_property RANGE [lindex $segments 0]])}]
-        if {$native_range <= 0 || ($native_range & ($native_range-1)) || $native_range > (1 << $::control_aperture_bits)} {
+        if {$native_range <= 0 || ($native_range & ($native_range-1))} {
+            error "Native control register aperture must be a positive power of two: $name"
+        }
+        return [dict create cell $cell master $master slave $slave clock [lindex $clocks 0] \
+            reset [lindex $resets 0] segment [lindex $segments 0] range $native_range]
+    }
+
+    # An exported IP can use its own interface names. Match by metadata and
+    # normalize its memory master with the vendor converter, never bit slicing.
+    proc create_rm {rm {control_base 0}} {
+        set top [dict get $rm top]
+        if {![dict exists $rm vlnv] || [dict get $rm vlnv] eq ""} {
+            set cell [create_bd_cell -type module -reference $top $top]
+            apply_rm_params $cell [dict get $rm parameters]
+            connect_rm_ports $top
+            return
+        }
+        set control_ports [get_bd_intf_ports -filter {MODE == Slave && VLNV =~ *:aximm_rtl:*}]
+        set memory_ports [get_bd_intf_ports -filter {MODE == Master && VLNV =~ *:aximm_rtl:*}]
+        if {[llength $control_ports] != 1 || [llength $memory_ports] != 1} {
+            error "Memory RP needs one control slave and memory master boundary"
+        }
+        set control_port [lindex $control_ports 0]
+        set memory_port [lindex $memory_ports 0]
+        set control_space [get_bd_addr_spaces [get_property NAME $control_port]]
+        set_property -dict [list CONFIG.PROTOCOL AXI4LITE CONFIG.ADDR_WIDTH 32 \
+            CONFIG.DATA_WIDTH 32] $control_port
+        set_property -dict [list CONFIG.PROTOCOL AXI4 CONFIG.ADDR_WIDTH 64 \
+            CONFIG.DATA_WIDTH $::memory_data_width] $memory_port
+        set_property range 0x100000000 $control_space
+        set ip [create_memory_ip $rm]
+        set name [dict get $rm cell_name]
+        set master [dict get $ip master]
+        set slave [dict get $ip slave]
+        set native_range [dict get $ip range]
+        if {$native_range > (1 << $::control_aperture_bits)} {
             error "Native control register aperture does not fit memory RP: $name"
         }
         set aperture 0
@@ -81,9 +95,9 @@ namespace eval utils {
         connect_bd_net [get_bd_ports clk] [get_bd_pins $adapter/aclk]
         connect_bd_net [get_bd_ports rst_n] [get_bd_pins $adapter/aresetn]
         create_bd_addr_seg -range [expr {1 << $aperture}] -offset $control_base \
-            $control_space [lindex $segments 0] control_registers
-        connect_bd_net [get_bd_ports clk] [lindex $clocks 0]
-        connect_bd_net [get_bd_ports rst_n] [lindex $resets 0]
+            $control_space [dict get $ip segment] control_registers
+        connect_bd_net [get_bd_ports clk] [dict get $ip clock]
+        connect_bd_net [get_bd_ports rst_n] [dict get $ip reset]
         set data_width [get_property CONFIG.DATA_WIDTH $master]
         set id_width [get_property CONFIG.ID_WIDTH $master]
         if {$data_width != $::memory_data_width || $id_width != 0} {

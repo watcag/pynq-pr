@@ -123,6 +123,9 @@ reconfigurable_partitions:
         vlnv: example.org:kernel:first:1.0
       - cell_name: second
         vlnv: example.org:kernel:second:1.0
+static_modules:
+  - cell_name: auxiliary
+    vlnv: example.org:kernel:auxiliary:1.0
 ```
 
 Use `vlnv` for exported IP, or the existing `top`/`sources` form for RTL matching
@@ -132,6 +135,20 @@ decodes the actual native register aperture; upper addresses
 return DECERR instead of aliasing native registers. The vendor AXI data-width converter
 handles master data-width and ID adaptation inside the RP. Extra master/control
 interfaces and incompatible protocols are rejected.
+
+Optional `static_modules` keep exported memory-master IPs outside every RP.
+Each entry uses `cell_name`, `vlnv`, and optional `parameters`, and must expose
+one AXI4 master with 64-bit addresses, one AXI-Lite control slave with 32-bit
+data, one clock, and one active-low reset. The static interconnect adapts native
+data/ID widths. Each control window uses its own metadata-defined aperture;
+`control_aperture_bits` limits RP windows only. Static IPs use the system clock
+and reset, remain at their named top-level hierarchy across swaps, and have no
+shutdown manager, decoupler, or RP reset. Their complete exported IP boundaries
+are preserved with `DONT_TOUCH` constraints before implementation optimization;
+internal hierarchy remains free to optimize. Include these services in the
+caller's drain check when they share work or buffers with the swapped RP.
+An omitted or empty list keeps the existing flow unchanged. Streaming configs
+reject nonempty `static_modules`.
 
 ```python
 # Buffer owners remain alive; this callback checks kernel AND response monitors.

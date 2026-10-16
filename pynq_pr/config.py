@@ -1,4 +1,5 @@
 import yaml
+import re
 from pathlib import Path
 
 VALID_RECONFIG_METHODS = ("pcap", "icap")
@@ -39,6 +40,11 @@ def validate(config, root_dir):
             raise ValueError("memory_data_width must be 32, 64, 128, 256 or 512")
         if not 4 <= config.get("control_aperture_bits", 8) <= 16:
             raise ValueError("control_aperture_bits must be between 4 and 16")
+    static = config.get("static_modules", [])
+    if not isinstance(static, list):
+        raise ValueError("static_modules must be a list")
+    if static and interface != "memory":
+        raise ValueError("static_modules require interface: memory")
 
     if not config.get("sources") and not config.get("ip_repositories"):
         raise ValueError("Provide sources or ip_repositories")
@@ -70,6 +76,23 @@ def validate(config, root_dir):
             if rm["cell_name"] in seen_cells:
                 raise ValueError(f"Duplicate cell_name in partition '{pname}': {rm['cell_name']}")
             seen_cells.add(rm["cell_name"])
+
+    reserved = seen_partitions | {"ps", "rst_system", "rps_axi_periph", "rps_interconnect",
+        "gpio_decouple", "gpio_rp_reset", "gpio_shutdown", "shutdown_status"}
+    reserved.update(f"{tag}_{name}" for name in seen_partitions for tag in ("decouple", "reset", "shutdown"))
+    for module in static:
+        if not isinstance(module, dict) or not module.get("vlnv") or "top" in module:
+            raise ValueError("Static modules need vlnv and cell_name, not top")
+        if not isinstance(module.get("parameters", {}), dict):
+            raise ValueError("Static module parameters must be a mapping")
+        name = module.get("cell_name", "")
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            raise ValueError("Static module cell_name must be a simple identifier")
+        if name in reserved:
+            raise ValueError(f"Duplicate or reserved static module cell_name: {name}")
+        reserved.add(name)
+    if len(static) + len(partitions) + 3 > 16:
+        raise ValueError("Memory interface supports at most 16 control ports including the three GPIOs")
 
     width = config.get("stream_width", 32)
     if width not in (32, 64, 128, 256, 512, 1024):
@@ -105,6 +128,7 @@ def apply_defaults(config, root_dir):
     config.setdefault("interface", "stream")
     config.setdefault("memory_data_width", 128)
     config.setdefault("control_aperture_bits", 8)
+    config.setdefault("static_modules", [])
 
     dummy = "dummy_memory.v" if config["interface"] == "memory" else ("dummy.v" if config["streams"] == 1 else "dummy2.v")
     dummy_path = str(PKG_DIR / "rtl" / dummy)

@@ -25,6 +25,100 @@ def test_stream_default_and_memory_placeholder(tmp_path):
         apply_defaults(cfg, tmp_path)
         assert Path(cfg['sources'][-1]).name == dummy
         assert cfg['control_aperture_bits'] == 8
+        assert cfg['static_modules'] == []
+
+
+def test_static_modules_and_generated_tcl(tmp_path):
+    from pynq_pr.builder import generate_tcl_config
+    from pynq_pr.boards import load_board
+    import subprocess
+    cfg = config(tmp_path, interface='memory', static_modules=[dict(cell_name='auxiliary',
+        vlnv='vendor:library:engine:1.0', parameters={'WIDTH': 64})])
+    validate(cfg, tmp_path)
+    apply_defaults(cfg, tmp_path)
+    text = generate_tcl_config(cfg, load_board('kv260'), tmp_path, tmp_path/'project',
+        tmp_path/'bits', tmp_path/'pblocks.xdc')
+    result = subprocess.run(['tclsh'], input=text + '\nputs $static_modules\n',
+        text=True, capture_output=True, check=True)
+    assert not result.stderr
+    assert result.stdout.strip() == '{cell_name auxiliary vlnv vendor:library:engine:1.0 parameters {WIDTH 64}}'
+
+
+@pytest.mark.parametrize('static', [None, {}, [{'cell_name':'auxiliary'}],
+    [{'cell_name':'auxiliary','top':'rm','vlnv':'v:l:k:1'}],
+    [{'cell_name':'compute','vlnv':'v:l:k:1'}],
+    [{'cell_name':'gpio_shutdown','vlnv':'v:l:k:1'}],
+    [{'cell_name':'reset_compute','vlnv':'v:l:k:1'}],
+    [{'cell_name':'auxiliary/engine','vlnv':'v:l:k:1'}],
+    [{'cell_name':'auxiliary','vlnv':'v:l:k:1','parameters':[]}],
+    [{'cell_name':'auxiliary','vlnv':'v:l:k:1'}]*2,
+    [{'cell_name':f'aux{i}','vlnv':'v:l:k:1'} for i in range(13)]])
+def test_static_module_admission(tmp_path, static):
+    with pytest.raises(ValueError):
+        validate(config(tmp_path, interface='memory', static_modules=static), tmp_path)
+
+
+def test_static_module_rejects_stream_interface(tmp_path):
+    with pytest.raises(ValueError, match='interface: memory'):
+        validate(config(tmp_path, static_modules=[dict(cell_name='auxiliary', vlnv='v:l:k:1')]), tmp_path)
+
+
+def test_fixed_ip_boundary_constraints_only_when_configured(tmp_path, monkeypatch):
+    import yaml
+    from pynq_pr.builder import build
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr('pynq_pr.builder.subprocess.run', lambda *args, **kwargs: None)
+    for name, static in [('legacy', []), ('fixed', [dict(cell_name='auxiliary', vlnv='v:l:k:1')])]:
+        cfg = config(tmp_path, interface='memory', static_modules=static)
+        cfg['project'] = name
+        path = tmp_path/(name+'.yaml')
+        path.write_text(yaml.safe_dump(cfg))
+        build(path, validate_only=True)
+        xdc = (tmp_path/'output'/name/'pblocks.xdc').read_text()
+        assert ('set_property DONT_TOUCH true [get_cells [list fixed_i/auxiliary]]' in xdc) == bool(static)
+        if not static:
+            assert 'DONT_TOUCH' not in xdc
+
+
+@pytest.mark.parametrize('fault', ['', 'protocol', 'address', 'control', 'reset', 'masters', 'aperture'])
+def test_memory_ip_metadata_admission(fault):
+    """Execute the shared Tcl admission helper against unsupported interfaces."""
+    import subprocess
+    source = Path(__file__).parents[1]/'pynq_pr/scripts/utils.tcl'
+    script = '''
+set properties [dict create master,CONFIG.PROTOCOL AXI4 master,CONFIG.ADDR_WIDTH 64 \
+    slave,CONFIG.PROTOCOL AXI4LITE slave,CONFIG.DATA_WIDTH 32 slave,CONFIG.ADDR_WIDTH 8 \
+    reset,CONFIG.POLARITY ACTIVE_LOW segment,RANGE 256]
+proc create_bd_cell {args} {return auxiliary}
+proc set_property {args} {}
+proc get_bd_intf_pins {args} {
+    if {[string match *Master* $args]} {
+        if {$::fault eq "masters"} {return {master second_master}}
+        return master
+    }
+    return slave
+}
+proc get_bd_pins {args} {
+    if {[string match *clk* $args]} {return clock}
+    return reset
+}
+proc get_bd_addr_segs {args} {return segment}
+proc get_property {property object} {return [dict get $::properties $object,$property]}
+switch $fault {
+    protocol {dict set properties master,CONFIG.PROTOCOL AXI3}
+    address {dict set properties master,CONFIG.ADDR_WIDTH 32}
+    control {dict set properties slave,CONFIG.DATA_WIDTH 64}
+    reset {dict set properties reset,CONFIG.POLARITY ACTIVE_HIGH}
+    aperture {dict set properties segment,RANGE 0}
+}
+set code [catch {utils::create_memory_ip [dict create cell_name auxiliary vlnv vendor:library:ip:1 parameters {}]} result]
+puts $code
+if {!$code} {puts [list [dict get $result master] [dict get $result reset] [dict get $result range]]}
+'''
+    result = subprocess.run(['tclsh'], input=f'source {{{source}}}\nset fault {{{fault}}}\n'+script,
+        text=True, capture_output=True, check=True)
+    assert not result.stderr
+    assert result.stdout.strip() == ('1' if fault else '0\nmaster reset 256')
 
 
 @pytest.mark.parametrize('options', [dict(board='pynq-z1'), dict(reconfiguration_method='icap'),

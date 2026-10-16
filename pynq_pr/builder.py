@@ -99,6 +99,13 @@ def generate_tcl_config(config, board, root_dir, proj_dir, bits_dir, pblocks_xdc
         lines.append(f"{part}{suffix}")
     lines.append("]")
 
+    static = []
+    for module in config.get("static_modules", []):
+        params = " ".join(f"{key} {{{value}}}" for key, value in module.get("parameters", {}).items())
+        static.append(f'[dict create cell_name "{module["cell_name"]}" vlnv "{module["vlnv"]}" '
+                      f'parameters [dict create {params}]]')
+    lines.append("set static_modules [list " + " ".join(static) + "]")
+
     return "\n".join(lines) + "\n"
 
 
@@ -129,6 +136,12 @@ def build(config_path, force=False, jobs=16, validate_only=False):
         board, config["reconfigurable_partitions"],
         config["project"], proj_dir,
     )
+    # Keep each fixed exported IP's complete boundary intact through opt_design,
+    # so the same source/physical interface can be exercised after routing.
+    with pblocks_xdc.open("a") as constraints:
+        for module in config["static_modules"]:
+            cell = f'{config["project"]}_i/{module["cell_name"]}'
+            constraints.write(f'set_property DONT_TOUCH true [get_cells [list {cell}]]\n')
 
     tcl_content = generate_tcl_config(config, board, root_dir, proj_dir, bits_dir, pblocks_xdc, jobs, validate_only)
     config_tcl_path = proj_dir / "build_config.tcl"
@@ -171,4 +184,6 @@ def validate_config(config_path):
             params = rm.get("parameters", {})
             extra = f"  params={params}" if params else ""
             print(f"    {rm['cell_name']}  module={rm.get('top', rm.get('vlnv'))}{extra}")
+    for module in config["static_modules"]:
+        print(f"  Static {module['cell_name']}: {module['vlnv']}")
     print("Valid.")
