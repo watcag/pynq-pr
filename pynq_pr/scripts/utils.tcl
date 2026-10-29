@@ -60,6 +60,7 @@ namespace eval utils {
         if {![string is integer -strict $hz] || $hz <= 0} {
             error "Memory RP requires a resolved positive integer clock frequency: $clock_port"
         }
+        puts "MEMORY_IP_CLOCK_BIND boundary=$clock_port frequency_hz=$hz"
         foreach endpoint [concat [list [dict get $ip clock] [dict get $ip slave]] [dict get $ip masters]] {
             set_property CONFIG.FREQ_HZ $hz $endpoint
             if {[get_property CONFIG.FREQ_HZ $endpoint] ne $hz} {

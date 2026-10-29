@@ -14,7 +14,7 @@ puts [dict values $values]
 '''
     r=subprocess.run(['tclsh'],input=script,text=True,capture_output=True,check=True)
     assert not r.stderr
-    assert r.stdout.splitlines()==[frequency,' '.join([frequency]*4)]
+    assert r.stdout.splitlines()==[f'MEMORY_IP_CLOCK_BIND boundary=boundary frequency_hz={frequency}',frequency,' '.join([frequency]*4)]
 @pytest.mark.parametrize('frequency',['{}','0','-1','124998749.0','arbitrary'])
 def test_unresolved_invalid_frequency_rejected_before_metadata_change(frequency):
     script=f'source {{{UTILS}}}\nset frequency {frequency}\n'+'''
@@ -33,4 +33,4 @@ proc set_property {args} {}
 puts [catch {utils::bind_memory_ip_clock [dict create clock clock slave slave masters {m0 m1}] boundary}]
 '''
     r=subprocess.run(['tclsh'],input=script,text=True,capture_output=True,check=True)
-    assert not r.stderr and r.stdout=='1\n'
+    assert not r.stderr and r.stdout=='MEMORY_IP_CLOCK_BIND boundary=boundary frequency_hz=124998749\n1\n'
