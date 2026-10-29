@@ -47,3 +47,37 @@ def test_invalid_master_count_rejected_before_vendor_creation(count):
     result=subprocess.run(['tclsh'],input=f'source {{{UTILS}}}\nputs [catch {{utils::aggregate_memory_masters {{{names}}}}} message]\nputs $message\n',text=True,capture_output=True,check=True)
     assert not result.stderr
     assert result.stdout.startswith('1\nMemory RP aggregation needs')
+
+
+@pytest.mark.parametrize('allow,count,fault,reject', [(0,2,'',True),(1,2,'',False),
+    (1,2,'protocol',True),(1,2,'address',True),(1,0,'',True),(1,17,'',True)])
+def test_metadata_checks_every_master_and_static_default_stays_strict(allow,count,fault,reject):
+    names=' '.join(f'm{i}' for i in range(count))
+    script=f'source {{{UTILS}}}\nset masters {{{names}}}\nset fault {{{fault}}}\n'+'''
+proc create_bd_cell {args} {return device}
+proc set_property {args} {}
+proc get_bd_intf_pins {args} {
+    if {[string match *Master* $args]} {return $::masters}
+    return slave
+}
+proc get_bd_pins {args} {
+    if {[string match *clk* $args]} {return clock}
+    return reset
+}
+proc get_bd_addr_segs {args} {return segment}
+proc get_property {key object} {
+    if {$object eq "m1" && $::fault eq "protocol" && $key eq "CONFIG.PROTOCOL"} {return AXI3}
+    if {$object eq "m1" && $::fault eq "address" && $key eq "CONFIG.ADDR_WIDTH"} {return 32}
+    switch $key {
+        CONFIG.PROTOCOL {return [expr {$object eq "slave" ? "AXI4LITE" : "AXI4"}]}
+        CONFIG.ADDR_WIDTH {return [expr {$object eq "slave" ? 8 : 64}]}
+        CONFIG.DATA_WIDTH {return 32}
+        CONFIG.POLARITY {return ACTIVE_LOW}
+        RANGE {return 256}
+    }
+    error "unexpected metadata property"
+}
+'''+f'puts [catch {{utils::create_memory_ip [dict create cell_name device vlnv vendor:library:ip:1 parameters {{}}] {allow}}} result]\n'
+    result=subprocess.run(['tclsh'],input=script,text=True,capture_output=True,check=True)
+    assert not result.stderr
+    assert result.stdout.strip()==str(int(reject))
