@@ -62,7 +62,9 @@ namespace eval utils {
         }
         puts "MEMORY_IP_CLOCK_BIND boundary=$clock_port frequency_hz=$hz"
         foreach endpoint [concat [list [dict get $ip clock] [dict get $ip slave]] [dict get $ip masters]] {
-            set_property CONFIG.FREQ_HZ $hz $endpoint
+            if {[get_property CONFIG.FREQ_HZ $endpoint] ne $hz} {
+                set_property CONFIG.FREQ_HZ $hz $endpoint
+            }
             if {[get_property CONFIG.FREQ_HZ $endpoint] ne $hz} {
                 error "Memory IP clock metadata did not resolve to its connected clock: $endpoint"
             }

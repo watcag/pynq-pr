@@ -34,3 +34,14 @@ puts [catch {utils::bind_memory_ip_clock [dict create clock clock slave slave ma
 '''
     r=subprocess.run(['tclsh'],input=script,text=True,capture_output=True,check=True)
     assert not r.stderr and r.stdout=='MEMORY_IP_CLOCK_BIND boundary=boundary frequency_hz=124998749\n1\n'
+
+
+def test_already_correct_readonly_metadata_does_not_require_a_write():
+    script=f'source {{{UTILS}}}\n'+'''
+proc get_property {key object} {return 124998749}
+proc set_property {args} {error "immutable metadata must not be written"}
+puts [utils::bind_memory_ip_clock [dict create clock clock slave slave masters {m0 m1}] boundary]
+'''
+    r=subprocess.run(['tclsh'],input=script,text=True,capture_output=True,check=True)
+    assert not r.stderr
+    assert r.stdout=='MEMORY_IP_CLOCK_BIND boundary=boundary frequency_hz=124998749\n124998749\n'
