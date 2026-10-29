@@ -14,7 +14,7 @@ namespace eval utils {
     }
 
     # Shared metadata admission for fixed and reconfigurable memory-master IPs.
-    proc create_memory_ip {module} {
+    proc create_memory_ip {module {allow_multiple 0}} {
         set name [dict get $module cell_name]
         set cell [create_bd_cell -type ip -vlnv [dict get $module vlnv] $name]
         apply_rm_params $cell [dict get $module parameters]
@@ -22,14 +22,18 @@ namespace eval utils {
         set slaves [get_bd_intf_pins -of_objects $cell -filter {MODE == Slave && VLNV =~ *:aximm_rtl:*}]
         set clocks [get_bd_pins -of_objects $cell -filter {TYPE == clk && DIR == I}]
         set resets [get_bd_pins -of_objects $cell -filter {TYPE == rst && DIR == I}]
-        if {[llength $masters] != 1 || [llength $slaves] != 1 || [llength $clocks] != 1 || [llength $resets] != 1} {
+        if {[llength $masters] < 1 || [llength $masters] > 16 || (!$allow_multiple && [llength $masters] != 1) || [llength $slaves] != 1 || [llength $clocks] != 1 || [llength $resets] != 1} {
             error "Memory IP needs exactly one AXI master, AXI-Lite slave, clock and reset: $name"
         }
         set master [lindex $masters 0]
         set slave [lindex $slaves 0]
-        if {[get_property CONFIG.PROTOCOL $master] ne "AXI4" ||
-            [get_property CONFIG.ADDR_WIDTH $master] != 64 ||
-            [get_property CONFIG.PROTOCOL $slave] ne "AXI4LITE" ||
+        foreach candidate $masters {
+            if {[get_property CONFIG.PROTOCOL $candidate] ne "AXI4" ||
+                [get_property CONFIG.ADDR_WIDTH $candidate] != 64} {
+                error "Memory IP master protocol/address does not match RP: $name"
+            }
+        }
+        if {[get_property CONFIG.PROTOCOL $slave] ne "AXI4LITE" ||
             [get_property CONFIG.DATA_WIDTH $slave] != 32 ||
             [get_property CONFIG.ADDR_WIDTH $slave] > 32} {
             error "Memory IP AXI protocol/address or control aperture does not match RP: $name"
@@ -44,8 +48,42 @@ namespace eval utils {
         if {$native_range <= 0 || ($native_range & ($native_range-1))} {
             error "Native control register aperture must be a positive power of two: $name"
         }
-        return [dict create cell $cell master $master slave $slave clock [lindex $clocks 0] \
+        return [dict create cell $cell master $master masters $masters slave $slave clock [lindex $clocks 0] \
             reset [lindex $resets 0] segment [lindex $segments 0] range $native_range]
+    }
+
+    # Combine independent native masters inside one RP before its shared
+    # shutdown boundary. Vendor arbitration/ID routing keeps response ownership;
+    # no address or ID bit slicing is permitted at this boundary.
+    proc aggregate_memory_masters {masters} {
+        if {[llength $masters] == 1} {
+            set master [lindex $masters 0]
+            return [dict create master $master data_width [get_property CONFIG.DATA_WIDTH $master] \
+                id_width [get_property CONFIG.ID_WIDTH $master]]
+        }
+        if {[llength $masters] < 2 || [llength $masters] > 16} {
+            error "Memory RP aggregation needs between two and sixteen masters"
+        }
+        set merge [create_bd_cell -type ip -vlnv xilinx.com:ip:axi_interconnect memory_merge]
+        set_property -dict [list CONFIG.NUM_SI [llength $masters] CONFIG.NUM_MI 1] $merge
+        connect_bd_net [get_bd_ports clk] [get_bd_pins $merge/ACLK] [get_bd_pins $merge/M00_ACLK]
+        connect_bd_net [get_bd_ports rst_n] [get_bd_pins $merge/ARESETN] [get_bd_pins $merge/M00_ARESETN]
+        set width 0
+        set ids 0
+        set i 0
+        foreach master $masters {
+            set slot [format S%02d $i]
+            connect_bd_intf_net $master [get_bd_intf_pins $merge/${slot}_AXI]
+            connect_bd_net [get_bd_ports clk] [get_bd_pins $merge/${slot}_ACLK]
+            connect_bd_net [get_bd_ports rst_n] [get_bd_pins $merge/${slot}_ARESETN]
+            set width [expr {max($width, [get_property CONFIG.DATA_WIDTH $master])}]
+            set ids [expr {max($ids, [get_property CONFIG.ID_WIDTH $master])}]
+            incr i
+        }
+        set source_bits 0
+        while {(1 << $source_bits) < [llength $masters]} {incr source_bits}
+        return [dict create master [get_bd_intf_pins $merge/M00_AXI] data_width $width \
+            id_width [expr {max(1, $ids)+$source_bits}]]
     }
 
     # An exported IP can use its own interface names. Match by metadata and
@@ -71,9 +109,10 @@ namespace eval utils {
         set_property -dict [list CONFIG.PROTOCOL AXI4 CONFIG.ADDR_WIDTH 64 \
             CONFIG.DATA_WIDTH $::memory_data_width] $memory_port
         set_property range 0x100000000 $control_space
-        set ip [create_memory_ip $rm]
+        set ip [create_memory_ip $rm 1]
         set name [dict get $rm cell_name]
-        set master [dict get $ip master]
+        set combined [aggregate_memory_masters [dict get $ip masters]]
+        set master [dict get $combined master]
         set slave [dict get $ip slave]
         set native_range [dict get $ip range]
         if {$native_range > (1 << $::control_aperture_bits)} {
@@ -98,8 +137,8 @@ namespace eval utils {
             $control_space [dict get $ip segment] control_registers
         connect_bd_net [get_bd_ports clk] [dict get $ip clock]
         connect_bd_net [get_bd_ports rst_n] [dict get $ip reset]
-        set data_width [get_property CONFIG.DATA_WIDTH $master]
-        set id_width [get_property CONFIG.ID_WIDTH $master]
+        set data_width [dict get $combined data_width]
+        set id_width [dict get $combined id_width]
         if {$data_width != $::memory_data_width || $id_width != 0} {
             set converter [create_bd_cell -type ip -vlnv xilinx.com:ip:axi_dwidth_converter memory_adapter]
             set_property -dict [list CONFIG.PROTOCOL AXI4 CONFIG.ADDR_WIDTH 64 \
