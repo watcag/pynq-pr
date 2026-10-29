@@ -2,7 +2,10 @@
 # Memory masters must be idle before software requests/acknowledges shutdown.
 set design_name $project_name
 create_bd_design $design_name
+unset -nocomplain memory_ddr_windows memory_ddr_segments memory_ddr_exclusions
 source [file join $script_dir ps_${board_name}.tcl]
+if {[info exists memory_ddr_segments]} {set memory_ddr_windows [utils::memory_windows_from_segments $memory_ddr_segments]}
+set memory_masters {}
 set_property -dict [list CONFIG.PSU__USE__M_AXI_GP0 0 CONFIG.PSU__USE__S_AXI_GP3 0] $ps
 set count [llength $partition_names]
 if {![info exists static_modules]} {set static_modules {}}
@@ -64,6 +67,7 @@ foreach name $partition_names {
     foreach pin {decouple shutdown} {create_bd_pin -dir I $pin}
     create_bd_pin -dir O in_shutdown
     create_bd_cell -type module -reference dummy_memory dummy
+    lappend memory_masters [get_bd_intf_pins /$name/dummy/m_axi]
     set_property -dict [list CONFIG.DATA_WIDTH $memory_data_width CONFIG.CONTROL_ADDR_WIDTH 32] [get_bd_cells dummy]
     create_bd_cell -type ip -vlnv xilinx.com:ip:dfx_decoupler decoupler
     set_property -dict [list CONFIG.ALL_PARAMS $control_params CONFIG.GUI_INTERFACE_NAME AXILiteS CONFIG.GUI_INTERFACE_REGISTER false] [get_bd_cells decoupler]
@@ -104,6 +108,7 @@ set fixed_ips {}
 set i $count
 foreach module $static_modules {
     set ip [utils::create_memory_ip $module]
+    lappend memory_masters [dict get $ip master]
     set si [format S%02d $i]
     set mi [format M%02d [expr {$i+3}]]
     connect_bd_intf_net [dict get $ip master] [get_bd_intf_pins rps_interconnect/${si}_AXI]
@@ -139,7 +144,9 @@ foreach ip $fixed_ips {
     puts "STATIC_MEMORY_IP $name control_base=$next_control control_range=$size system_clock=$clk_net system_reset=$resetn_net"
     incr next_control $size
 }
-assign_bd_address
+if {[info exists memory_ddr_windows]} {
+    foreach master $memory_masters {utils::map_memory_ddr $master $memory_ddr_windows $memory_ddr_exclusions}
+} else {assign_bd_address}
 validate_bd_design
 save_bd_design
 close_bd_design $design_name

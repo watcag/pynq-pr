@@ -44,3 +44,10 @@ set hp1_aclk          [get_bd_pins ps/saxihp1_fpd_aclk]
 connect_bd_net $clk_net [get_bd_pins ps/maxihpm0_fpd_aclk]
 connect_bd_net $clk_net [get_bd_pins ps/maxihpm1_fpd_aclk]
 connect_bd_net $clk_net [get_bd_pins ps/saxihp0_fpd_aclk]
+
+# The memory-RP policy uses the actual PS DDR decoder windows only. Peripheral
+# OCM/QSPI segments stay explicitly excluded from accelerator masters.
+set memory_ddr_segments [list [get_bd_addr_segs ps/SAXIGP2/HP0_DDR_LOW] \
+    [get_bd_addr_segs ps/SAXIGP2/HP0_DDR_HIGH]]
+set memory_ddr_exclusions [list [get_bd_addr_segs ps/SAXIGP2/HP0_LPS_OCM] \
+    [get_bd_addr_segs ps/SAXIGP2/HP0_QSPI]]

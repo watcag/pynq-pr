@@ -47,7 +47,7 @@ foreach part_config $partition_configs {
 
     delete_bd_objs [get_bd_cells dummy]
     utils::create_rm $first_rm $control_base
-    if {[info exists rp_interface] && $rp_interface eq "memory"} {assign_bd_address}
+    if {[info exists rp_interface] && $rp_interface eq "memory" && ![info exists memory_ddr_windows]} {assign_bd_address}
 
     validate_bd_design
     save_bd_design
@@ -57,7 +57,10 @@ foreach part_config $partition_configs {
     if {[info exists rp_interface] && $rp_interface eq "memory"} {
         # Lock common routing apertures before enabling DFX. The first RM's
         # smaller register file must not shrink the static route for later RMs.
-        assign_bd_address
+        if {[info exists memory_ddr_windows]} {
+            set masters [get_bd_intf_pins -of_objects [get_bd_cells /${pname}/rp] -filter {MODE == Master && VLNV =~ *:aximm_rtl:*}]
+            foreach master $masters {utils::map_memory_ddr $master $memory_ddr_windows $memory_ddr_exclusions}
+        } else {assign_bd_address}
         foreach intf [get_bd_intf_pins -of_objects [get_bd_cells /${pname}/rp] -filter {VLNV =~ *:aximm_rtl:*}] {
             set apertures {}
             if {[get_property MODE $intf] eq "Slave"} {

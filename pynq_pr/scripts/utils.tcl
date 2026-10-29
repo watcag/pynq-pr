@@ -52,6 +52,103 @@ namespace eval utils {
             reset [lindex $resets 0] segment [lindex $segments 0] range $native_range]
     }
 
+    # Board code supplies actual PS DDR target objects. No address is selected
+    # from a solver/case, and no peripheral is included by automatic assignment.
+    proc checked_memory_windows {windows} {
+        set result {}
+        foreach window $windows {
+            foreach key {segment offset range} {
+                if {![dict exists $window $key]} {error "Incomplete DDR window: $key"}
+            }
+            set offset [dict get $window offset]
+            set range [dict get $window range]
+            if {![string is entier -strict $offset] || ![string is entier -strict $range] ||
+                $offset < 0 || $range <= 0 || ($range & ($range-1)) || ($offset % $range) ||
+                $offset+$range > (1 << 64)} {error "Invalid DDR window: $window"}
+            lappend result [dict replace $window offset [expr {$offset+0}] range [expr {$range+0}]]
+        }
+        if {![llength $result]} {error "No authoritative DDR windows"}
+        set result [lsort -command {apply {{a b} {expr {[dict get $a offset] < [dict get $b offset] ? -1 : [dict get $a offset] > [dict get $b offset]}}}} $result]
+        set end -1
+        foreach window $result {
+            if {[dict get $window offset] < $end} {error "Overlapping DDR windows"}
+            set end [expr {[dict get $window offset]+[dict get $window range]}]
+        }
+        return $result
+    }
+
+    proc require_memory_coverage {expected actual required_bytes} {
+        if {![string is entier -strict $required_bytes] || $required_bytes <= 0} {error "Invalid fixed BO envelope"}
+        if {[memory_window_pairs $expected] ne [memory_window_pairs $actual]} {
+            error "Master DDR windows do not match the complete static DDR windows"
+        }
+        set largest 0
+        foreach window [checked_memory_windows $expected] {set largest [expr {max($largest,[dict get $window range])}]}
+        if {$largest < $required_bytes} {error "No DDR window holds the complete fixed BO envelope"}
+    }
+
+    proc memory_windows_from_segments {segments} {
+        set windows {}
+        foreach segment $segments {
+            lappend windows [dict create segment $segment offset [get_property OFFSET $segment] \
+                range [get_property RANGE $segment]]
+        }
+        return [checked_memory_windows $windows]
+    }
+
+    proc memory_window_pairs {windows} {
+        set pairs {}
+        foreach window [checked_memory_windows $windows] {
+            lappend pairs offset [dict get $window offset] range [dict get $window range]
+        }
+        return $pairs
+    }
+
+    # Construction only: explicitly map full DDR windows and exclude every
+    # board-declared non-DDR target. The reporting/admission probe never calls it.
+    proc map_memory_ddr {master windows exclusions} {
+        set windows [checked_memory_windows $windows]
+        set spaces [get_bd_addr_spaces -of_objects $master]
+        if {![llength $spaces]} {error "Memory master has no address space: $master"}
+        foreach space $spaces {
+            set end 0
+            foreach window $windows {set end [expr {max($end,[dict get $window offset]+[dict get $window range])}]}
+            set range 1
+            while {$range < $end} {set range [expr {$range << 1}]}
+            if {[get_property RANGE $space] < $range} {set_property RANGE $range $space}
+            set old [get_bd_addr_segs -of_objects $space]
+            if {[llength $old]} {delete_bd_objs $old}
+            set index 0
+            foreach window $windows {
+                create_bd_addr_seg -offset [dict get $window offset] -range [dict get $window range] \
+                    $space [dict get $window segment] ddr_$index
+                incr index
+            }
+            foreach target $exclusions {exclude_bd_addr_seg -target_address_space $space $target}
+            puts "MEMORY_DDR_MAP master=$master space=$space windows=[memory_window_pairs $windows] excluded=$exclusions"
+        }
+    }
+
+    # The external master port is represented by a virtual slave segment.
+    # UG835's -external/-dict maps separate real DDR windows through that port;
+    # leaving its inferred 64 KiB Reg default silently narrows the aperture.
+    proc map_external_memory_ddr {masters port windows} {
+        set pairs [memory_window_pairs $windows]
+        set segments [get_bd_addr_segs -of_objects $port]
+        if {[llength $segments] != 1} {error "Expected one external memory virtual segment: $port"}
+        foreach master $masters {
+            set spaces [get_bd_addr_spaces -of_objects $master]
+            if {![llength $spaces]} {error "Memory master has no address space: $master"}
+            foreach space $spaces {
+                set old [get_bd_addr_segs -of_objects $space]
+                if {[llength $old]} {delete_bd_objs $old}
+                set mapped [assign_bd_address -external -dict $pairs -target_address_space $space [lindex $segments 0]]
+                if {![llength $mapped]} {error "External DDR mapping failed: $space"}
+                puts "MEMORY_EXTERNAL_DDR_MAP space=$space windows=$pairs"
+            }
+        }
+    }
+
     # A PS PLL/divider can resolve slightly away from its requested MHz.
     # Use the connected boundary clock, not an IP's packaging default, as the
     # metadata authority. This does not change the requested timing target.
@@ -171,6 +268,9 @@ namespace eval utils {
             connect_bd_net [get_bd_ports rst_n] [get_bd_pins $converter/s_axi_aresetn]
         } else {
             connect_bd_intf_net $memory_port -boundary_type upper $master
+        }
+        if {[info exists ::memory_ddr_windows]} {
+            map_external_memory_ddr [dict get $ip masters] $memory_port $::memory_ddr_windows
         }
     }
 

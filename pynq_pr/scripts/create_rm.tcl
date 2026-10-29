@@ -16,7 +16,7 @@ foreach part_config $partition_configs {
             set control_base [dict get $memory_control_offsets $pname]
         }
         utils::create_rm $rm $control_base
-        if {[info exists rp_interface] && $rp_interface eq "memory"} {assign_bd_address}
+        if {[info exists rp_interface] && $rp_interface eq "memory" && ![info exists memory_ddr_windows]} {assign_bd_address}
 
         validate_bd_design
         save_bd_design
