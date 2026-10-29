@@ -52,6 +52,23 @@ namespace eval utils {
             reset [lindex $resets 0] segment [lindex $segments 0] range $native_range]
     }
 
+    # A PS PLL/divider can resolve slightly away from its requested MHz.
+    # Use the connected boundary clock, not an IP's packaging default, as the
+    # metadata authority. This does not change the requested timing target.
+    proc bind_memory_ip_clock {ip clock_port} {
+        set hz [get_property CONFIG.FREQ_HZ $clock_port]
+        if {![string is integer -strict $hz] || $hz <= 0} {
+            error "Memory RP requires a resolved positive integer clock frequency: $clock_port"
+        }
+        foreach endpoint [concat [list [dict get $ip clock] [dict get $ip slave]] [dict get $ip masters]] {
+            set_property CONFIG.FREQ_HZ $hz $endpoint
+            if {[get_property CONFIG.FREQ_HZ $endpoint] ne $hz} {
+                error "Memory IP clock metadata did not resolve to its connected clock: $endpoint"
+            }
+        }
+        return $hz
+    }
+
     # Combine independent native masters inside one RP before its shared
     # shutdown boundary. Vendor arbitration/ID routing keeps response ownership;
     # no address or ID bit slicing is permitted at this boundary.
@@ -111,6 +128,9 @@ namespace eval utils {
         set_property range 0x100000000 $control_space
         set ip [create_memory_ip $rm 1]
         set name [dict get $rm cell_name]
+        connect_bd_net [get_bd_ports clk] [dict get $ip clock]
+        connect_bd_net [get_bd_ports rst_n] [dict get $ip reset]
+        bind_memory_ip_clock $ip [get_bd_ports clk]
         set combined [aggregate_memory_masters [dict get $ip masters]]
         set master [dict get $combined master]
         set slave [dict get $ip slave]
@@ -135,8 +155,6 @@ namespace eval utils {
         connect_bd_net [get_bd_ports rst_n] [get_bd_pins $adapter/aresetn]
         create_bd_addr_seg -range [expr {1 << $aperture}] -offset $control_base \
             $control_space [dict get $ip segment] control_registers
-        connect_bd_net [get_bd_ports clk] [dict get $ip clock]
-        connect_bd_net [get_bd_ports rst_n] [dict get $ip reset]
         set data_width [dict get $combined data_width]
         set id_width [dict get $combined id_width]
         if {$data_width != $::memory_data_width || $id_width != 0} {
