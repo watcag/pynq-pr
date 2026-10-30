@@ -81,3 +81,28 @@ set windows [list [dict create segment low offset 0 range 65536] [dict create se
 puts [catch {utils::require_memory_coverage $windows $windows 536870912}]
 '''
     assert tcl(script).strip() == '1'
+
+@pytest.mark.parametrize('value,valid', [('0',True),('0x800000000',True),('18446744073709551615',True),('-1',False),('1.0',False),('1e9',False),('Inf',False),('NaN',False),('1+1',False),('',False),('0x',False)])
+def test_exact_integer_parser_does_not_require_newer_tcl_entier_class(value,valid):
+    script = '''
+rename string host_string
+proc string {args} {
+ if {[lindex $args 0] eq "is" && [lindex $args 1] eq "entier"} {error "Vivado Tcl lacks entier"}
+ return [uplevel 1 [linsert $args 0 host_string]]
+}
+'''
+    script += f'puts [utils::is_nonnegative_integer {{{value}}}]\n'
+    assert tcl(script).strip() == str(int(valid))
+
+def test_ddr_windows_execute_when_entier_class_is_unavailable():
+    script = '''
+rename string host_string
+proc string {args} {
+ if {[lindex $args 0] eq "is" && [lindex $args 1] eq "entier"} {error "Vivado Tcl lacks entier"}
+ return [uplevel 1 [linsert $args 0 host_string]]
+}
+set windows [list [dict create segment low offset 0 range 2147483648] [dict create segment high offset 0x800000000 range 0x800000000]]
+utils::require_memory_coverage $windows $windows 536870912
+puts PASS
+'''
+    assert tcl(script).strip() == 'PASS'

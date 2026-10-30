@@ -54,6 +54,15 @@ namespace eval utils {
 
     # Board code supplies actual PS DDR target objects. No address is selected
     # from a solver/case, and no peripheral is included by automatic assignment.
+    # Vivado's bundled Tcl lacks `string is entier`; do not infer support from
+    # the host tclsh version. Accept exact decimal/hex integers only and let
+    # expr perform integer conversion without floating-point approximation.
+    proc is_nonnegative_integer {value} {
+        if {![regexp {^(0[xX][0-9a-fA-F]+|[0-9]+)$} $value]} {return 0}
+        if {[catch {expr {$value+0}} parsed]} {return 0}
+        return [expr {$parsed >= 0}]
+    }
+
     proc checked_memory_windows {windows} {
         set result {}
         foreach window $windows {
@@ -62,7 +71,7 @@ namespace eval utils {
             }
             set offset [dict get $window offset]
             set range [dict get $window range]
-            if {![string is entier -strict $offset] || ![string is entier -strict $range] ||
+            if {![is_nonnegative_integer $offset] || ![is_nonnegative_integer $range] ||
                 $offset < 0 || $range <= 0 || ($range & ($range-1)) || ($offset % $range) ||
                 $offset+$range > (1 << 64)} {error "Invalid DDR window: $window"}
             lappend result [dict replace $window offset [expr {$offset+0}] range [expr {$range+0}]]
@@ -78,7 +87,7 @@ namespace eval utils {
     }
 
     proc require_memory_coverage {expected actual required_bytes} {
-        if {![string is entier -strict $required_bytes] || $required_bytes <= 0} {error "Invalid fixed BO envelope"}
+        if {![is_nonnegative_integer $required_bytes] || $required_bytes <= 0} {error "Invalid fixed BO envelope"}
         if {[memory_window_pairs $expected] ne [memory_window_pairs $actual]} {
             error "Master DDR windows do not match the complete static DDR windows"
         }
