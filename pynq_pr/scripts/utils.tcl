@@ -82,9 +82,12 @@ namespace eval utils {
         if {[memory_window_pairs $expected] ne [memory_window_pairs $actual]} {
             error "Master DDR windows do not match the complete static DDR windows"
         }
-        set largest 0
-        foreach window [checked_memory_windows $expected] {set largest [expr {max($largest,[dict get $window range])}]}
-        if {$largest < $required_bytes} {error "No DDR window holds the complete fixed BO envelope"}
+        # The KV host allocates in the low PS DDR/CMA aperture. A large high
+        # DDR window cannot compensate for a truncated low decoder route.
+        set low [lindex [checked_memory_windows $expected] 0]
+        if {[dict get $low offset] != 0 || [dict get $low range] < $required_bytes} {
+            error "Low DDR window does not hold the complete fixed BO envelope"
+        }
     }
 
     proc memory_windows_from_segments {segments} {

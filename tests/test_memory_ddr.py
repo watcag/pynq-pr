@@ -74,3 +74,10 @@ def test_coverage_rejects_narrow_or_extra_routes_and_undersized_bo_envelope(actu
     script='set expected [list [dict create segment low offset 0 range 0x80000000] [dict create segment high offset 0x800000000 range 0x800000000]]\n'
     script+=f'puts [catch {{utils::require_memory_coverage $expected {{{actual}}} {required}}}]\n'
     assert tcl(script).strip()==str(int(reject))
+
+def test_large_high_window_cannot_hide_insufficient_low_cma_aperture():
+    script = '''
+set windows [list [dict create segment low offset 0 range 65536] [dict create segment high offset 0x800000000 range 0x800000000]]
+puts [catch {utils::require_memory_coverage $windows $windows 536870912}]
+'''
+    assert tcl(script).strip() == '1'
