@@ -3,6 +3,10 @@ import re
 from pathlib import Path
 
 VALID_RECONFIG_METHODS = ("pcap", "icap")
+# opt_design -directive values (Vivado 2024.2's list, plus AddRemap and NoBramPowerOpt from earlier releases)
+OPT_DIRECTIVES = ("Default", "Explore", "ExploreArea", "ExploreSequentialArea", "ExploreWithRemap",
+                  "RuntimeOptimized", "AddRemap", "NoBramPowerOpt")
+IMPLEMENTATION_KEYS = ("opt_directive", "phys_opt", "place_fit_check")
 PKG_DIR = Path(__file__).parent
 
 
@@ -111,9 +115,29 @@ def validate(config, root_dir):
     if regions is not None and (not isinstance(regions, list) or not all(isinstance(r, str) for r in regions)):
         raise ValueError("reconfigurable_regions must be a list of clock region names, e.g. [X0Y1, X1Y1]")
 
+    validate_implementation(config.get("implementation"))
+
     for src in config.get("sources", []):
         if not (root_dir / src).exists():
             raise FileNotFoundError(f"Source not found: {root_dir / src}")
+
+
+def validate_implementation(impl):
+    """Optional `implementation` settings; every key may be left out to keep Vivado's run defaults."""
+    if impl is None:
+        return
+    if not isinstance(impl, dict):
+        raise ValueError("implementation must be a mapping, e.g. {opt_directive: ExploreArea, phys_opt: false}")
+    unknown = sorted(set(impl) - set(IMPLEMENTATION_KEYS))
+    if unknown:
+        raise ValueError(f"Unknown implementation keys {unknown}. Valid: {list(IMPLEMENTATION_KEYS)}")
+    directive = impl.get("opt_directive")
+    if directive is not None and directive not in OPT_DIRECTIVES:
+        raise ValueError(f"implementation.opt_directive '{directive}' is not an opt_design directive. "
+                         f"Valid: {list(OPT_DIRECTIVES)}")
+    for key in ("phys_opt", "place_fit_check"):
+        if key in impl and not isinstance(impl[key], bool):
+            raise ValueError(f"implementation.{key} must be true or false, got {impl[key]!r}")
 
 
 def apply_defaults(config, root_dir):
@@ -129,6 +153,7 @@ def apply_defaults(config, root_dir):
     config.setdefault("memory_data_width", 128)
     config.setdefault("control_aperture_bits", 8)
     config.setdefault("static_modules", [])
+    config["implementation"] = dict(config.get("implementation") or {})   # empty: Vivado's run defaults
 
     dummy = "dummy_memory.v" if config["interface"] == "memory" else ("dummy.v" if config["streams"] == 1 else "dummy2.v")
     dummy_path = str(PKG_DIR / "rtl" / dummy)

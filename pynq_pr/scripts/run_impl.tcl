@@ -66,13 +66,28 @@ foreach vc $variant_configs {
     create_run impl_${vc} -parent_run impl_base -flow [get_property FLOW [get_runs impl_base]] -pr_config config_${vc}
 }
 
-launch_runs synth_1 -jobs $jobs
-wait_on_runs synth_1
-source [file join $script_dir qualify_impl.tcl]
 set implementation_runs [list impl_base]
 foreach vc $variant_configs {
     lappend implementation_runs impl_${vc}
 }
+
+# Optional implementation settings (YAML `implementation`), on every implementation run.
+# Unset, each run keeps Vivado's defaults.
+foreach run $implementation_runs {
+    if {[info exists impl_opt_directive] && $impl_opt_directive ne ""} {
+        set_property STEPS.OPT_DESIGN.ARGS.DIRECTIVE $impl_opt_directive [get_runs $run]
+    }
+    if {[info exists impl_phys_opt] && $impl_phys_opt ne ""} {
+        set_property STEPS.PHYS_OPT_DESIGN.IS_ENABLED [expr {$impl_phys_opt ? true : false}] [get_runs $run]
+    }
+    if {[info exists impl_place_fit_check] && $impl_place_fit_check} {
+        set_property STEPS.PLACE_DESIGN.TCL.POST [file normalize [file join $script_dir place_fit_check.tcl]] [get_runs $run]
+    }
+}
+
+launch_runs synth_1 -jobs $jobs
+wait_on_runs synth_1
+source [file join $script_dir qualify_impl.tcl]
 set qualification_dir [file join $proj_dir qualification]
 file mkdir $qualification_dir
 set checkpoints {}
