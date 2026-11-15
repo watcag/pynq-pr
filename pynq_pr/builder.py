@@ -37,6 +37,10 @@ def generate_tcl_config(config, board, root_dir, proj_dir, bits_dir, pblocks_xdc
     tcl_set("rp_interface", config["interface"])
     tcl_set("memory_data_width", config["memory_data_width"])
     tcl_set("control_aperture_bits", config["control_aperture_bits"])
+    impl = config.get("implementation", {})
+    tcl_set("impl_opt_directive", impl.get("opt_directive", ""))
+    tcl_set("impl_phys_opt", "" if impl.get("phys_opt") is None else int(impl["phys_opt"]))
+    tcl_set("impl_place_fit_check", int(bool(impl.get("place_fit_check", False))))
     tcl_set("validate_only", int(validate_only))
     tcl_set("jobs", jobs)
     tcl_set("proj_dir", str(proj_dir))
@@ -185,6 +189,9 @@ def validate_config(config_path):
     if config.get("axis_switch"):
         print(f"RP Switch:   enabled")
     print(f"Data clock:  {config['data_freq']} MHz, stream {config['stream_width']} bits, DMA burst {config['dma_burst']}")
+    impl = config["implementation"]
+    if impl:
+        print("Impl:        " + ", ".join(f"{k}={v}" for k, v in impl.items()))
     print(f"Partitions:  {len(config['reconfigurable_partitions'])}")
     for part in config["reconfigurable_partitions"]:
         print(f"  {part['partition_name']}:")

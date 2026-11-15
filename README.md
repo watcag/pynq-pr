@@ -90,6 +90,27 @@ publication-order fault tests using Tcl command doubles.
 | `regions` (per partition) | split of `reconfigurable_regions` | Clock regions of this partition, e.g. `regions: [X1Y2, X2Y2, X0Y3, X1Y3, X2Y3]`; give it for every partition to choose the split yourself (block RAM and URAM sit in some columns only). |
 | `dma_burst` | `16` | AXI DMA maximum burst length (beats, 2 to 256), both channels. |
 | `streams` | `1` | Stream pairs per partition, each with its own AXI DMA: pair 0 is `x`/`y` on HP0, pair 1 is `x1`/`y1` (DMA `dma1`) on HP1. `2` needs `pcap` and no `axis_switch`. |
+| `implementation` | Vivado's run defaults | Implementation settings for every implementation run (static and each RM configuration); see below. |
+
+### Implementation settings
+
+`implementation` is optional; any key left out keeps Vivado's default for the run:
+
+```yaml
+implementation:
+  opt_directive: ExploreArea   # opt_design -directive (Default, Explore, ExploreArea, ExploreSequentialArea,
+                               # ExploreWithRemap, RuntimeOptimized, AddRemap, NoBramPowerOpt)
+  phys_opt: false              # run phys_opt_design after placement (true/false)
+  place_fit_check: true        # check every partition's placement before routing
+```
+
+`ExploreArea` with `phys_opt: false` trades timing optimization for area, which can let a module that is
+just too large for its partition fit without changing the floorplan. `place_fit_check` runs
+`scripts/place_fit_check.tcl` after `place_design`: for each pblock it writes `place_fit_<pblock>.rpt`
+(utilization) and `place_fit_<pblock>.txt` (pblock sites, SLICE/DSP/RAMB/URAM sites the partition uses,
+and how many lie outside the pblock) into the run directory, and fails the run before routing if any
+partition logic lies outside its pblock or the pblock is over-utilized (DRC UTLZ-1). Timing is still
+checked after routing as usual.
 
 ### RTL interface requirements
 
